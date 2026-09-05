@@ -67,16 +67,28 @@ export function CaptureView() {
     }
   }
 
+  function unlockAudioContext() {
+    try {
+      const context = new AudioContext();
+      void context.resume();
+      return context;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function finishIngest(
     clip: Blob,
     capturePath: "upload" | "in-app",
     fileName?: string,
+    audioContext?: AudioContext,
   ) {
     setPhase("reading");
     setReadProgress(0);
     const result = await ingestClip(clip, {
       capturePath,
       fileName,
+      audioContext,
       orientationSamples:
         capturePath === "in-app" ? orientationSamplesRef.current : [],
       grantedCamera: grantedCameraRef.current,
@@ -99,6 +111,7 @@ export function CaptureView() {
       return;
     }
     setError(null);
+    const audioContext = unlockAudioContext();
     try {
       const duration = await readClipDurationSeconds(file);
       if (isClipTooLong(duration)) {
@@ -106,7 +119,7 @@ export function CaptureView() {
         setPhase("choose");
         return;
       }
-      await finishIngest(file, "upload", file.name);
+      await finishIngest(file, "upload", file.name, audioContext);
     } catch (caught) {
       setPhase("choose");
       setError(
@@ -119,6 +132,7 @@ export function CaptureView() {
 
   async function startInApp() {
     setError(null);
+    const audioContext = unlockAudioContext();
     unlockSpeech();
     orientationSamplesRef.current = [];
     try {
@@ -167,7 +181,7 @@ export function CaptureView() {
       const blob = await recording.result;
       window.clearInterval(tick);
       stopLive();
-      await finishIngest(blob, "in-app", "in-app-recording");
+      await finishIngest(blob, "in-app", "in-app-recording", audioContext);
     } catch (caught) {
       stopLive();
       setPhase("choose");

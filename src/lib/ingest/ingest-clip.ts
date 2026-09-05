@@ -26,6 +26,7 @@ export type IngestClipOptions = {
   orientationSamples?: OrientationSample[];
   fileName?: string;
   grantedCamera?: MediaTrackSettings;
+  audioContext?: AudioContext;
   onProgress?: (progress: IngestProgress) => void;
 };
 
@@ -33,7 +34,7 @@ function attachHiddenVideo(video: HTMLVideoElement) {
   video.setAttribute("playsinline", "");
   video.setAttribute("webkit-playsinline", "");
   video.playsInline = true;
-  video.muted = false;
+  video.muted = true;
   video.volume = 0;
   video.preload = "auto";
   video.controls = false;
@@ -60,20 +61,31 @@ function sampleAnalyserRms(
   return Math.sqrt(sum / buffer.length);
 }
 
-function connectAnalyser(video: HTMLVideoElement): {
+function createAnalyser(context?: AudioContext): {
   context: AudioContext;
   analyser: AnalyserNode;
+  connected: boolean;
 } | null {
   try {
-    const context = new AudioContext();
-    const source = context.createMediaElementSource(video);
-    const analyser = context.createAnalyser();
+    const audioContext = context ?? new AudioContext();
+    const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
-    source.connect(analyser);
-    return { context, analyser };
+    return { context: audioContext, analyser, connected: false };
   } catch {
     return null;
   }
+}
+
+function attachAnalyser(
+  audio: { context: AudioContext; analyser: AnalyserNode; connected: boolean },
+  video: HTMLVideoElement,
+) {
+  if (audio.connected || audio.context.state !== "running") {
+    return;
+  }
+  const source = audio.context.createMediaElementSource(video);
+  source.connect(audio.analyser);
+  audio.connected = true;
 }
 
 async function poseOnBitmap(
@@ -101,7 +113,11 @@ export async function ingestClip(
   const timestamps: number[] = [];
   const audioRms: number[] = [];
   const keypoints: PoseFrame[] = [];
-  let audio = connectAnalyser(video);
+  const audio = createAnalyser(options.audioContext);
+  if (audio) {
+    void audio.context.resume().catch(() => undefined);
+    attachAnalyser(audio, video);
+  }
   const timeDomain = audio
     ? new Uint8Array(new ArrayBuffer(audio.analyser.fftSize))
     : null;
@@ -112,6 +128,7 @@ export async function ingestClip(
   let poseRuntime: PoseRuntime | null = null;
   let poseBackend: IngestResult["poseBackend"] = "unavailable";
   let poseStartedAt = 0;
+  let detectStamp = 1;
 
   const finish = () => {
     finished = true;
@@ -142,113 +159,146 @@ export async function ingestClip(
       };
 
       video.addEventListener("error", onError, { once: true });
-      video.addEventListener(
-        "loadedmetadata",
-        () => {
-          void (async () => {
-            if (audio) {
-              try {
-                await audio.context.resume();
-              } catch {
-                audio = null;
-              }
-            }
+      const startPlayback = () => {
+        void (async () => {
+          if (audio) {
+            attachAnalyser(audio, video);
+          }
 
-            const durationMs = Number.isFinite(video.duration)
-              ? video.duration * 1000
-              : 45000;
-            const watchdog = window.setTimeout(
-              () => {
-                if (!finished) {
+          const durationMs = Number.isFinite(video.duration)
+            ? video.duration * 1000
+            : 45000;
+          const watchdog = window.setTimeout(
+            () => {
+              if (!finished) {
+                finish();
+                resolve();
+              }
+            },
+            Math.ceil(durationMs) + 20000,
+          );
+
+          const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
+            if (finished) {
+              return;
+            }
+            video.pause();
+            void (async () => {
+              try {
+                timestamps.push(metadata.mediaTime);
+                if (audio && timeDomain) {
+                  audioRms.push(sampleAnalyserRms(audio.analyser, timeDomain));
+                }
+
+                const frameWidth = video.videoWidth;
+                const frameHeight = video.videoHeight;
+
+                if (!crop) {
+                  const isolationPoses = await poseOnBitmap(
+                    poseRuntime,
+                    video,
+                    null,
+                    detectStamp,
+                  );
+                  detectStamp += 1;
+                  const golfer = pickLargestCentralPerson(isolationPoses);
+                  crop = golfer
+                    ? (cropFromPerson(golfer, frameWidth, frameHeight) ??
+                      fullFrameCrop(frameWidth, frameHeight))
+                    : fullFrameCrop(frameWidth, frameHeight);
+                }
+
+                const croppedPoses = await poseOnBitmap(
+                  poseRuntime,
+                  video,
+                  crop,
+                  detectStamp,
+                );
+                detectStamp += 1;
+                const tracked =
+                  pickLargestCentralPerson(croppedPoses) ?? croppedPoses[0];
+                const landmarks = padLandmarks(tracked);
+                keypoints.push({
+                  mediaTime: metadata.mediaTime,
+                  landmarks,
+                  crop,
+                });
+                if (tracked) {
+                  crop = recenterCropOnHips(
+                    crop,
+                    landmarks,
+                    frameWidth,
+                    frameHeight,
+                  );
+                }
+
+                options.onProgress?.({
+                  currentTime: video.currentTime,
+                  duration: video.duration,
+                  phase: "streaming",
+                });
+              } catch {
+                // Keep streaming even if a single pose frame fails.
+              } finally {
+                const duration = Number.isFinite(video.duration)
+                  ? video.duration
+                  : metadata.mediaTime + 1;
+                const nextTime = metadata.mediaTime + 0.1;
+                const atEnd = video.ended || nextTime >= duration - 0.01;
+                if (!finished && !atEnd) {
+                  const continueFrom = () => {
+                    if (finished) {
+                      return;
+                    }
+                    frameHandle = video.requestVideoFrameCallback(onFrame);
+                    video.play().catch(() => {
+                      if (!finished) {
+                        window.clearTimeout(watchdog);
+                        finish();
+                        resolve();
+                      }
+                    });
+                  };
+                  if (Math.abs(video.currentTime - nextTime) > 0.03) {
+                    video.addEventListener("seeked", continueFrom, {
+                      once: true,
+                    });
+                    video.currentTime = nextTime;
+                  } else {
+                    continueFrom();
+                  }
+                } else if (!finished) {
+                  window.clearTimeout(watchdog);
                   finish();
                   resolve();
                 }
-              },
-              Math.ceil(durationMs) + 20000,
-            );
-
-            const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
-              if (finished) {
-                return;
               }
-              void (async () => {
-                try {
-                  timestamps.push(metadata.mediaTime);
-                  if (audio && timeDomain) {
-                    audioRms.push(
-                      sampleAnalyserRms(audio.analyser, timeDomain),
-                    );
-                  }
+            })();
+          };
 
-                  const frameWidth = video.videoWidth;
-                  const frameHeight = video.videoHeight;
-                  const timestampMs = metadata.mediaTime * 1000;
+          video.addEventListener(
+            "ended",
+            () => {
+              window.clearTimeout(watchdog);
+              finish();
+              resolve();
+            },
+            { once: true },
+          );
 
-                  if (!crop) {
-                    const isolationPoses = await poseOnBitmap(
-                      poseRuntime,
-                      video,
-                      null,
-                      timestampMs,
-                    );
-                    const golfer = pickLargestCentralPerson(isolationPoses);
-                    crop = golfer
-                      ? (cropFromPerson(golfer, frameWidth, frameHeight) ??
-                        fullFrameCrop(frameWidth, frameHeight))
-                      : fullFrameCrop(frameWidth, frameHeight);
-                  }
-
-                  const croppedPoses = await poseOnBitmap(
-                    poseRuntime,
-                    video,
-                    crop,
-                    timestampMs + 0.25,
-                  );
-                  const tracked =
-                    pickLargestCentralPerson(croppedPoses) ?? croppedPoses[0];
-                  const landmarks = padLandmarks(tracked);
-                  keypoints.push({
-                    mediaTime: metadata.mediaTime,
-                    landmarks,
-                    crop,
-                  });
-                  if (tracked) {
-                    crop = recenterCropOnHips(
-                      crop,
-                      landmarks,
-                      frameWidth,
-                      frameHeight,
-                    );
-                  }
-
-                  options.onProgress?.({
-                    currentTime: video.currentTime,
-                    duration: video.duration,
-                    phase: "streaming",
-                  });
-                } catch {
-                  // Keep streaming even if a single pose frame fails.
-                } finally {
-                  if (!finished && !video.ended) {
-                    frameHandle = video.requestVideoFrameCallback(onFrame);
-                  }
-                }
-              })();
-            };
-
-            video.addEventListener(
-              "ended",
-              () => {
-                window.clearTimeout(watchdog);
-                finish();
-                resolve();
-              },
-              { once: true },
-            );
-
-            poseStartedAt = performance.now();
-            frameHandle = video.requestVideoFrameCallback(onFrame);
-            video.play().catch((error: unknown) => {
+          poseStartedAt = performance.now();
+          if (video.currentTime > 0) {
+            video.currentTime = 0;
+          }
+          frameHandle = video.requestVideoFrameCallback(onFrame);
+          video
+            .play()
+            .then(() => {
+              if (audio) {
+                attachAnalyser(audio, video);
+              }
+            })
+            .catch((error: unknown) => {
               window.clearTimeout(watchdog);
               finish();
               reject(
@@ -257,15 +307,27 @@ export async function ingestClip(
                   : new Error("Playback failed while reading the clip."),
               );
             });
-          })();
-        },
-        { once: true },
-      );
+        })();
+      };
+
+      if (video.readyState >= 1) {
+        startPlayback();
+      } else {
+        video.addEventListener("loadedmetadata", startPlayback, { once: true });
+      }
     });
 
     const poseElapsedMs = performance.now() - poseStartedAt;
     const poseFpsProcessed =
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
+    const firstCrop = keypoints[0]?.crop;
+    console.info(
+      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${poseBackend})${
+        firstCrop
+          ? ` crop=${Math.round(firstCrop.x)},${Math.round(firstCrop.y)},${Math.round(firstCrop.width)}x${Math.round(firstCrop.height)}`
+          : ""
+      }`,
+    );
     const rate = detectFrameRate(timestamps, options.fileName);
     const peak = audioRms.reduce((max, value) => Math.max(max, value), 0);
 
