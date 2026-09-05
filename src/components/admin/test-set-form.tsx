@@ -20,6 +20,7 @@ import {
 } from "@/components/admin/fields";
 import { estimateCameraAngle } from "@/lib/engine/angle";
 import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
+import { AV_CLOCK_OFFSET_MS } from "@/lib/engine/phases";
 import { detectVerticalRollFromClip } from "@/lib/engine/angle-capture";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
@@ -163,6 +164,9 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
       });
       console.info(
         `[dialitin] angle-estimate ${angleResult.angle.elapsedMs.toFixed(2)}ms case=${angleResult.angle.case} valid=${angleResult.angle.valid}`,
+      );
+      console.info(
+        `[dialitin] ingest diagnostics audio=${result.impactDiagnostics?.audioTransientFrameIndex ?? "—"} motionPeak=${result.impactDiagnostics?.motionPeakFrameIndex ?? "—"} avOffset=${result.impactDiagnostics?.measuredAvOffsetMs ?? "—"} storedAv=${AV_CLOCK_OFFSET_MS[swing.capture_path === "in_app" ? "in_app" : "native_slomo"]}`,
       );
       const save = await fetch(`/api/admin/test-swings/${swing.id}/pose`, {
         method: "POST",

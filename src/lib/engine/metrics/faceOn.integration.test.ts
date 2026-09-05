@@ -4,6 +4,7 @@ import {
   computeFaceOnMetrics,
   type FaceOnMetricKey,
 } from "@/lib/engine/metrics/faceOn";
+import { SLO_MO_TIMING_REASON } from "@/lib/engine/metrics/timing-gate";
 import { phasesFromUnknown } from "@/lib/engine/phases";
 import { framesFromStoredKeypoints } from "@/lib/preview/coverage";
 import type { ClubFamily, Handedness, ShotIntent } from "@/lib/admin/test-swings";
@@ -188,6 +189,16 @@ describe.skipIf(!hasSupabase)("G01 face-on metrics report", () => {
       for (const key of METRIC_KEYS) {
         expect(metrics[key]).toBeDefined();
         expect(typeof metrics[key].value).toBe("number");
+      }
+
+      if (phases!.sloMoReexportedAt30.value) {
+        expect(metrics.tempo_ratio.valid).toBe(false);
+        expect(metrics.tempo_ratio.reason).toBe(SLO_MO_TIMING_REASON);
+        expect(metrics.sequence_proxy.valid).toBe(false);
+        expect(metrics.sequence_proxy.reason).toBe(SLO_MO_TIMING_REASON);
+        expect(metrics.lead_elbow_separation.valid).toBe(false);
+        expect(metrics.lead_elbow_separation.reason).toBe(SLO_MO_TIMING_REASON);
+        expect(metrics.shoulder_rotation_top.valid).toBe(true);
       }
     },
     120_000,

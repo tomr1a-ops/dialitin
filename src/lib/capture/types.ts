@@ -1,4 +1,4 @@
-import type { SwingPhases } from "@/lib/engine/phases";
+import type { SwingPhases, ImpactDiagnostics } from "@/lib/engine/phases";
 import type { PoseFrame } from "@/lib/pose/types";
 
 export type CapturePath = "upload" | "in-app";
@@ -57,6 +57,7 @@ export type IngestResult = {
   poseWatchdogHit: boolean;
   grantedCamera?: MediaTrackSettings;
   phases: SwingPhases;
+  impactDiagnostics: ImpactDiagnostics;
 };
 
 export const MAX_CLIP_SECONDS = 30;

@@ -196,6 +196,24 @@ describe("findSwingPhases", () => {
     expect(phases.sloMoReexportedAt30.value).toBe(true);
   });
 
+  test("address stillness requires hands below hip line", () => {
+    const phases = findSwingPhases(syntheticSwing());
+    expect(phases.address.valid).toBe(true);
+    expect(phases.address.reason).toContain("hands below hip line");
+  });
+
+  test("reduces phase timing confidence when slo-mo re-export", () => {
+    const phases = findSwingPhases(syntheticSwing({ fps: 30 }), {
+      capturePath: "native_slomo",
+      labeledFrameRate: 120,
+      fileName: "IMG_8642.mov",
+    });
+    expect(phases.sloMoReexportedAt30.value).toBe(true);
+    expect(phases.top.valid).toBe(true);
+    expect(phases.top.confidence).toBeLessThanOrEqual(0.35);
+    expect(phases.top.reason).toBe("slo-mo re-export — timing unreliable");
+  });
+
   test("applies the (default-zero) A/V offset to the audio candidate", () => {
     const frames = syntheticSwing();
     const motion = findSwingPhases(frames);

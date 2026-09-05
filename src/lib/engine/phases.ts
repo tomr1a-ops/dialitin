@@ -1,4 +1,5 @@
 import { derived, invalidDerived, type Derived } from "@/lib/engine/derived";
+import { SLO_MO_TIMING_REASON } from "@/lib/engine/slo-mo-export";
 import { detectFrameRate } from "@/lib/ingest/detect-frame-rate";
 import {
   LEFT_HIP,
@@ -190,6 +191,8 @@ function handPoint(
 type Kinematics = {
   times: number[];
   hands: Array<{ x: number; y: number } | null>;
+  /** Average hip y per frame — hands must hang below this at address. */
+  hipLineY: Array<number | null>;
   speed: number[];
   dt: number[];
   stillSpeed: number;
@@ -204,6 +207,14 @@ function kinematics(
   const hands = frames.map((frame) => {
     const point = handPoint(frame, trail, lead);
     return point ? { x: point.x, y: point.y } : null;
+  });
+  const hipLineY = frames.map((frame) => {
+    const left = joint(frame, LEFT_HIP);
+    const right = joint(frame, RIGHT_HIP);
+    if (left && right) {
+      return (left.y + right.y) / 2;
+    }
+    return left?.y ?? right?.y ?? null;
   });
   const speed = new Array<number>(frames.length).fill(0);
   const dt = new Array<number>(frames.length).fill(0);
@@ -239,7 +250,7 @@ function kinematics(
   const finite = smoothed.filter((value) => value > 0);
   const peak = finite.length ? Math.max(...finite) : 1;
   const stillSpeed = Math.max(STILL_SPEED, peak * 0.12);
-  return { times, hands: smoothedHands, speed: smoothed, dt, stillSpeed };
+  return { times, hands: smoothedHands, hipLineY, speed: smoothed, dt, stillSpeed };
 }
 
 export function handCentroidSeries(
@@ -710,29 +721,59 @@ function monotonicHeightRise(
   return true;
 }
 
+function handsBelowHipLine(kin: Kinematics, index: number): boolean {
+  const hand = kin.hands[index];
+  const hipY = kin.hipLineY[index];
+  if (!hand || hipY === null) {
+    return false;
+  }
+  // Image y grows downward — hanging hands sit below the hip line.
+  return hand.y >= hipY - 0.015;
+}
+
 function stillnessBeforeTakeaway(kin: Kinematics, takeawayIndex: number) {
-  let end = -1;
-  for (let i = takeawayIndex - 1; i >= 1; i--) {
-    if (stillAt(kin, i)) {
-      end = i;
-    } else if (end >= 0) {
-      break;
+  let best: { start: number; end: number } | null = null;
+
+  for (let end = takeawayIndex - 1; end >= 1; end--) {
+    if (!stillAt(kin, end)) {
+      continue;
     }
+
+    let start = end;
+    while (start > 0 && stillAt(kin, start - 1)) {
+      start -= 1;
+    }
+
+    if (kin.times[end]! - kin.times[start]! < STILLNESS_MS) {
+      end = start - 1;
+      continue;
+    }
+
+    let handsHanging = true;
+    for (let i = start; i <= end; i++) {
+      if (!handsBelowHipLine(kin, i)) {
+        handsHanging = false;
+        break;
+      }
+    }
+    if (!handsHanging) {
+      end = start - 1;
+      continue;
+    }
+
+    if (!monotonicHeightRise(kin, end, takeawayIndex)) {
+      end = start - 1;
+      continue;
+    }
+
+    if (!best || end > best.end) {
+      best = { start, end };
+    }
+
+    end = start;
   }
-  if (end < 0) {
-    return null;
-  }
-  let start = end;
-  while (start > 0 && stillAt(kin, start - 1)) {
-    start -= 1;
-  }
-  if (kin.times[end]! - kin.times[start]! < STILLNESS_MS) {
-    return null;
-  }
-  if (!monotonicHeightRise(kin, end, takeawayIndex)) {
-    return null;
-  }
-  return { start, end };
+
+  return best;
 }
 
 function dropWaggleToAddress(kin: Kinematics, topIndex: number) {
@@ -814,6 +855,31 @@ function emptyPhases(reason: string, fps: Derived<number>): SwingPhases {
       "effective rate matches the capture",
     ),
     trim: invalidDerived({ startMs: 0, endMs: 0 }, reason),
+  };
+}
+
+function penalizePhaseTiming(mark: PhaseMark): PhaseMark {
+  if (!mark.valid) {
+    return mark;
+  }
+  return {
+    ...mark,
+    confidence: Math.min(mark.confidence, 0.35),
+    reason: SLO_MO_TIMING_REASON,
+  };
+}
+
+function applySloMoPhaseTimingPenalty(phases: SwingPhases): SwingPhases {
+  if (!phases.sloMoReexportedAt30.value) {
+    return phases;
+  }
+  return {
+    ...phases,
+    address: penalizePhaseTiming(phases.address),
+    takeaway: penalizePhaseTiming(phases.takeaway),
+    top: penalizePhaseTiming(phases.top),
+    impact: penalizePhaseTiming(phases.impact),
+    finish: penalizePhaseTiming(phases.finish),
   };
 }
 
@@ -944,7 +1010,7 @@ export function findSwingPhases(
     addressIndex,
     kin.times[addressIndex]!,
     still ? 0.85 : 0.45,
-    still ? "stillness window before takeaway" : "no clear stillness window",
+    still ? "stillness window before takeaway; hands below hip line" : "no clear stillness window",
   );
   const takeaway = mark(
     takeawayIndex,
@@ -969,7 +1035,7 @@ export function findSwingPhases(
   const lastMs = kin.times[kin.times.length - 1] ?? finish.timeMs;
   const endMs = Math.min(lastMs, finish.timeMs + TRIM_PAD_MS);
 
-  return {
+  return applySloMoPhaseTimingPenalty({
     address,
     takeaway,
     top,
@@ -984,7 +1050,7 @@ export function findSwingPhases(
       address.valid && finish.valid,
       "0.5s before address to 0.5s after finish",
     ),
-  };
+  });
 }
 
 export function phasesFromUnknown(value: unknown): SwingPhases | null {

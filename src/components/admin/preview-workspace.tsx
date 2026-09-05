@@ -297,6 +297,12 @@ export function PreviewWorkspace({
 
           <section>
             <h2 className="text-lg font-semibold">Metrics</h2>
+            {phases?.sloMoReexportedAt30.value ? (
+              <p className="mt-2 rounded-xl border border-[#f3c36a]/40 bg-[#f3c36a]/10 px-4 py-3 text-sm font-medium text-[#f3c36a]">
+                Slo-mo re-export detected — timing metrics invalid (
+                {phases.sloMoReexportedAt30.reason ?? "near 30 fps"})
+              </p>
+            ) : null}
             {!metrics ? (
               <p className="mt-2 text-sm text-white/50">
                 Run pose on /admin/test-set to compute face-on metrics.

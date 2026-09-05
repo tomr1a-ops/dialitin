@@ -1,6 +1,12 @@
 import type { StoredAngle } from "@/lib/engine/angle";
 import { derived, invalidDerived, type Derived } from "@/lib/engine/derived";
 import type { SwingPhases } from "@/lib/engine/phases";
+import {
+  applySloMoTimingGate,
+  FACE_ON_TIMING_METRIC_KEYS,
+  gateTimingMetric,
+  isSloMoReexport,
+} from "@/lib/engine/metrics/timing-gate";
 import type { ClubFamily, Handedness, ShotIntent } from "@/lib/admin/test-swings";
 import {
   LEFT_ANKLE,
@@ -734,6 +740,15 @@ export function leadElbowSeparation(
   phases: SwingPhases,
   side: SideIndices,
 ): MetricRecord {
+  if (isSloMoReexport(phases)) {
+    return gateTimingMetric({
+      value: 0,
+      unit: "pct_stance",
+      confidence: 0,
+      valid: false,
+      reason: "fps",
+    });
+  }
   const fps = phases.effectiveFrameRate;
   if (!fps.valid || fps.value < 60) {
     return {
@@ -835,6 +850,15 @@ export function sequenceProxy(
   phases: SwingPhases,
   side: SideIndices,
 ): MetricRecord {
+  if (isSloMoReexport(phases)) {
+    return gateTimingMetric({
+      value: 0,
+      unit: "seconds",
+      confidence: 0,
+      valid: false,
+      reason: "top or impact invalid",
+    });
+  }
   const topIdx = phases.top.frameIndex;
   const impactIdx = phases.impact.frameIndex;
   if (!phases.top.valid || !phases.impact.valid || topIdx >= impactIdx) {
@@ -891,6 +915,15 @@ export function tempoRatio(
   clubFamily?: ClubFamily | null,
   intent?: ShotIntent | null,
 ): MetricRecord {
+  if (isSloMoReexport(phases)) {
+    return gateTimingMetric({
+      value: 0,
+      unit: "ratio",
+      confidence: 0,
+      valid: false,
+      reason: "phases or timestamps invalid",
+    });
+  }
   if (
     !phases.takeaway.valid ||
     !phases.top.valid ||
@@ -1072,42 +1105,46 @@ export function computeFaceOnMetrics(input: FaceOnMetricsInput): FaceOnMetrics {
     hipSwayBackMetric.reason,
   );
 
-  return {
-    shoulder_rotation_top: shoulderRotationTop(
-      addressFrame,
-      topFrame,
-      side,
-      aspect,
-    ),
-    hip_rotation_top: hipRotationTop(
-      addressFrame,
-      topFrame,
-      side,
-      aspect,
-      trailKneeDerived,
-      hipSwayDerived,
-    ),
-    trail_knee_flexion_change: trailKnee,
-    hip_sway_back: hipSwayBackMetric,
-    hip_slide_down: hipSlideDown(addressFrame, impactFrame, side, stance),
-    head_sway: headSway(addressFrame, topFrame, side, stance),
-    head_lift: headLift(addressFrame, impactFrame, side),
-    weight_transfer_proxy: weightTransferProxy(
-      addressFrame,
-      impactFrame,
-      side,
-      stance,
-    ),
-    width_at_top: widthAtTop(addressFrame, topFrame, side),
-    lead_elbow_separation: leadElbowSeparation(working, phases, side),
-    sequence_proxy: sequenceProxy(working, phases, side),
-    tempo_ratio: tempoRatio(phases, clubFamily, intent),
-    ball_position_inferred: ballPositionInferred(
-      addressFrame,
-      side,
-      alignmentSetupCandidate,
-    ),
-  };
+  return applySloMoTimingGate(
+    {
+      shoulder_rotation_top: shoulderRotationTop(
+        addressFrame,
+        topFrame,
+        side,
+        aspect,
+      ),
+      hip_rotation_top: hipRotationTop(
+        addressFrame,
+        topFrame,
+        side,
+        aspect,
+        trailKneeDerived,
+        hipSwayDerived,
+      ),
+      trail_knee_flexion_change: trailKnee,
+      hip_sway_back: hipSwayBackMetric,
+      hip_slide_down: hipSlideDown(addressFrame, impactFrame, side, stance),
+      head_sway: headSway(addressFrame, topFrame, side, stance),
+      head_lift: headLift(addressFrame, impactFrame, side),
+      weight_transfer_proxy: weightTransferProxy(
+        addressFrame,
+        impactFrame,
+        side,
+        stance,
+      ),
+      width_at_top: widthAtTop(addressFrame, topFrame, side),
+      lead_elbow_separation: leadElbowSeparation(working, phases, side),
+      sequence_proxy: sequenceProxy(working, phases, side),
+      tempo_ratio: tempoRatio(phases, clubFamily, intent),
+      ball_position_inferred: ballPositionInferred(
+        addressFrame,
+        side,
+        alignmentSetupCandidate,
+      ),
+    },
+    phases,
+    FACE_ON_TIMING_METRIC_KEYS,
+  );
 }
 
 export function faceOnMetricsFromUnknown(value: unknown): FaceOnMetrics | null {

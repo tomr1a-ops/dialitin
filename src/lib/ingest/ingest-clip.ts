@@ -3,7 +3,7 @@ import type {
   IngestResult,
   OrientationSample,
 } from "@/lib/capture/types";
-import { findSwingPhases } from "@/lib/engine/phases";
+import { findSwingPhases, type ImpactDiagnostics } from "@/lib/engine/phases";
 import { detectFrameRate } from "@/lib/ingest/detect-frame-rate";
 import {
   createPoseWorkCanvas,
@@ -386,12 +386,19 @@ export async function ingestClip(
       timeMs: (timestamps[index] ?? 0) * 1000,
       rms,
     }));
+    const impactDiagnostics: ImpactDiagnostics = {
+      audioTransientFrameIndex: null,
+      motionPeakFrameIndex: null,
+      motionImpactFrameIndex: null,
+      measuredAvOffsetMs: null,
+    };
     const phases = findSwingPhases(keypoints, {
       audioSamples,
       capturePath: options.capturePath,
       handedness: options.handedness,
       labeledFrameRate: options.labeledFrameRate,
       fileName: options.fileName,
+      diagnostics: impactDiagnostics,
     });
 
     return {
@@ -425,6 +432,7 @@ export async function ingestClip(
       poseWatchdogHit,
       grantedCamera: options.grantedCamera,
       phases,
+      impactDiagnostics,
     };
   } catch (error) {
     URL.revokeObjectURL(clipUrl);
