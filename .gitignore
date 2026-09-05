@@ -41,3 +41,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated MediaPipe assets (copied in postinstall)
+public/mediapipe/wasm/
+public/mediapipe/vision_bundle.mjs
+public/mediapipe/pose_landmarker_lite.task
+
+# local synthetic fixtures
+/tmp-fixtures/

@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "postinstall": "node scripts/copy-mediapipe.mjs",
     "check": "npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.115.0",
     "next": "16.3.4",

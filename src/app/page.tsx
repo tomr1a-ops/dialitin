@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-6 py-10">
@@ -10,12 +12,12 @@ export default function Home() {
           you back — and exactly how to fix it. No app. No subscription. Under a
           minute, on your phone.
         </p>
-        <button
-          type="button"
-          className="mt-10 min-h-12 w-full rounded-full bg-[#c8f542] px-6 text-[1.05rem] font-semibold text-[#0b1210]"
+        <Link
+          href="/capture"
+          className="mt-10 flex min-h-12 w-full items-center justify-center rounded-full bg-[#c8f542] px-6 text-[1.05rem] font-semibold text-[#0b1210]"
         >
           Analyze My Swing Free
-        </button>
+        </Link>
       </div>
     </main>
   );

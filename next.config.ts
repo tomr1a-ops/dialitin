@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  async headers() {
+    return [
+      {
+        source: "/mediapipe/wasm/:path*.wasm",
+        headers: [{ key: "Content-Type", value: "application/wasm" }],
+      },
+    ];
+  },
 };
 
 export default withSerwist(nextConfig);
