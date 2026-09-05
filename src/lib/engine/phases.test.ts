@@ -89,7 +89,7 @@ function syntheticSwing(options?: {
     pushStill(0.2, 0.5, 0.62);
   }
   pushPath(0.35, { x: 0.5, y: 0.62 }, { x: 0.28, y: 0.28 });
-  pushPath(0.18, { x: 0.28, y: 0.28 }, { x: 0.62, y: 0.68 }, (u) => u * u);
+  pushPath(0.28, { x: 0.28, y: 0.28 }, { x: 0.62, y: 0.68 }, (u) => u * u);
   pushPath(0.22, { x: 0.62, y: 0.68 }, { x: 0.78, y: 0.34 });
   pushStill(0.25, 0.78, 0.34);
   return frames;

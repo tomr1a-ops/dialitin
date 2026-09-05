@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { SkeletonOverlay } from "@/components/pose/skeleton-overlay";
 import { MetricPhaseStill } from "@/components/admin/metric-phase-still";
+import { PhaseDiagnosticChart } from "@/components/admin/phase-diagnostic-chart";
 import type { TestSwingListItem } from "@/lib/admin/test-swings";
 import type { FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
 import { diagnose } from "@/lib/engine/diagnose";
@@ -138,7 +139,19 @@ export function PreviewWorkspace({
           </div>
 
           <section>
-            <h2 className="text-lg font-semibold">Phase ticks</h2>
+            <h2 className="text-lg font-semibold">Phase diagnostics</h2>
+            <p className="mt-1 text-xs text-white/50">
+              Hand-centroid height (inverted y) and speed — phase ticks overlaid.
+            </p>
+            {phases && keypoints.length > 0 ? (
+              <PhaseDiagnosticChart
+                keypoints={keypoints}
+                phases={phases}
+                handedness={selected.handedness === "left" ? "left" : "right"}
+                durationSeconds={duration}
+              />
+            ) : null}
+            <h3 className="mt-4 text-sm font-medium text-white/70">Scrubber</h3>
             <div className="relative mt-3 h-12 overflow-hidden rounded-md bg-white/8">
               {phases ? (
                 phaseList(phases).map(({ key, mark }) => (

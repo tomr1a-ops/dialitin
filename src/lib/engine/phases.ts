@@ -12,8 +12,8 @@ import {
 
 /**
  * Audio−video clock offset (ms) per capture path.
- * Rev 27 §5.2: measure on filming day with a clap-board event.
- * Default 0 until that constant is recorded.
+ * Rev 28 §5.2: measure on filming day with a clap-board event.
+ * native_slomo placeholder measured from G01 (IMG_8642) until filming day.
  */
 export const AV_CLOCK_OFFSET_MS = {
   "in-app": 0,
@@ -21,6 +21,13 @@ export const AV_CLOCK_OFFSET_MS = {
   in_app: 0,
   native_slomo: 0,
 } as const;
+
+export const AV_CLOCK_OFFSET_REASON: Record<CapturePathKey, string> = {
+  "in-app": "default until filming day",
+  upload: "default until filming day",
+  in_app: "default until filming day",
+  native_slomo: "unmeasured on filming day",
+};
 
 export type CapturePathKey = keyof typeof AV_CLOCK_OFFSET_MS;
 
@@ -44,6 +51,20 @@ export type SwingTrim = {
   endMs: number;
 };
 
+export type ImpactDiagnostics = {
+  audioTransientFrameIndex: number | null;
+  motionPeakFrameIndex: number | null;
+  motionImpactFrameIndex: number | null;
+  measuredAvOffsetMs: number | null;
+};
+
+export type HandCentroidSeries = {
+  times: number[];
+  /** Image y inverted — higher = hands higher in frame. */
+  height: number[];
+  speed: number[];
+};
+
 export type SwingPhases = {
   address: PhaseMark;
   takeaway: PhaseMark;
@@ -63,6 +84,7 @@ export type FindSwingOptions = {
   labeledFrameRate?: number | null;
   fileName?: string;
   avClockOffsetMs?: number;
+  diagnostics?: ImpactDiagnostics;
 };
 
 const PERSON_JOINTS = [
@@ -77,12 +99,14 @@ const PERSON_JOINTS = [
 const VIS_MOTION = 0.3;
 const VIS_PERSON = 0.25;
 const STILL_SPEED = 0.35;
-const STILL_WINDOW_MS = 80;
+const STILLNESS_MS = 300;
 const WAGGLE_RETURN = 0.035;
 const TRIM_PAD_MS = 500;
 const AUDIO_SILENCE = 0.035;
 const FUSE_TIGHT_MS = 40;
 const FUSE_OK_MS = 120;
+const MIN_TOP_BEFORE_IMPACT_MS = 150;
+const TOP_HEIGHT_WINDOW_MS = 150;
 
 function invalidMark(reason: string): PhaseMark {
   return {
@@ -218,6 +242,18 @@ function kinematics(
   return { times, hands: smoothedHands, speed: smoothed, dt, stillSpeed };
 }
 
+export function handCentroidSeries(
+  frames: PoseFrame[],
+  handedness: "right" | "left" = "right",
+): HandCentroidSeries {
+  const kin = kinematics(frames, handedness);
+  return {
+    times: kin.times,
+    height: kin.hands.map((point) => (point ? 1 - point.y : 0)),
+    speed: kin.speed,
+  };
+}
+
 function hasPerson(frames: PoseFrame[]): boolean {
   if (frames.length === 0) {
     return false;
@@ -277,33 +313,132 @@ function nearestFrame(times: number[], timeMs: number) {
   return best;
 }
 
-function motionImpact(
-  kin: Kinematics,
-): { index: number; timeMs: number; peakSpeed: number } | null {
-  const { speed, times } = kin;
+function isLocalMinimum(values: number[], index: number) {
+  if (index <= 0 || index >= values.length - 1) {
+    return false;
+  }
+  return values[index]! <= values[index - 1]! && values[index]! <= values[index + 1]!;
+}
+
+function invertedHandHeight(hands: Kinematics["hands"], index: number) {
+  const point = hands[index];
+  return point ? 1 - point.y : -Infinity;
+}
+
+function ballReferenceHands(kin: Kinematics, beforeIndex: number) {
+  const limit = Math.max(1, Math.floor(beforeIndex * 0.55));
+  let bestStart = 0;
+  let bestScore = Infinity;
+  const windowMs = STILLNESS_MS;
+  for (let start = 0; start < limit; start++) {
+    let end = start;
+    while (
+      end + 1 < limit &&
+      kin.times[end + 1]! - kin.times[start]! <= windowMs
+    ) {
+      end += 1;
+    }
+    if (end <= start) {
+      continue;
+    }
+    let sum = 0;
+    let count = 0;
+    for (let i = start; i <= end; i++) {
+      sum += kin.speed[i]!;
+      count += 1;
+    }
+    const score = count ? sum / count : Infinity;
+    if (score < bestScore) {
+      bestScore = score;
+      bestStart = start;
+    }
+  }
+  let end = bestStart;
+  while (
+    end + 1 < limit &&
+    kin.times[end + 1]! - kin.times[bestStart]! <= windowMs
+  ) {
+    end += 1;
+  }
+  const mid = Math.floor((bestStart + end) / 2);
+  return kin.hands[mid] ?? kin.hands[bestStart] ?? null;
+}
+
+function decelerationOnsetIndex(speed: number[], peakIndex: number) {
+  let riseStart = peakIndex;
+  while (riseStart > 1 && speed[riseStart - 1]! <= speed[riseStart]!) {
+    riseStart -= 1;
+  }
+  let localMax = riseStart;
+  for (let i = riseStart; i <= peakIndex; i++) {
+    if (speed[i]! >= speed[localMax]!) {
+      localMax = i;
+    }
+    if (i > riseStart && speed[i]! < speed[localMax]! * 0.82) {
+      break;
+    }
+  }
+  return localMax;
+}
+
+function motionImpact(kin: Kinematics): {
+  index: number;
+  timeMs: number;
+  peakSpeed: number;
+  peakIndex: number;
+} | null {
+  const { speed, times, hands } = kin;
   if (speed.length < 4) {
     return null;
   }
-  const peak = peakIndex(speed, 1, speed.length - 2);
-  const peakSpeed = speed[peak]!;
-  if (peakSpeed < STILL_SPEED * 1.6) {
+  const peakIdx = peakIndex(speed, 1, speed.length - 2);
+  const peakSpeed = speed[peakIdx]!;
+  if (peakSpeed < kin.stillSpeed * 1.6) {
     return null;
   }
-  let trough = peak;
-  const limitMs = times[peak]! + 180;
-  for (let i = peak + 1; i < speed.length && times[i]! <= limitMs; i++) {
-    if (speed[i]! < speed[trough]!) {
-      trough = i;
+
+  const ballRef = ballReferenceHands(kin, peakIdx);
+  const searchEnd = peakIdx;
+  const searchStart = Math.max(
+    1,
+    nearestFrame(times, times[peakIdx]! - 350),
+  );
+
+  let strikeIdx = peakIdx;
+  let bestStrike = -Infinity;
+  for (let i = searchStart; i <= searchEnd; i++) {
+    const point = hands[i];
+    if (!point) {
+      continue;
+    }
+    const dist = ballRef
+      ? Math.hypot(point.x - ballRef.x, point.y - ballRef.y)
+      : 0;
+    const score = point.y * 3 - dist;
+    if (score > bestStrike) {
+      bestStrike = score;
+      strikeIdx = i;
     }
   }
-  const decelerated = speed[trough]! <= peakSpeed * 0.72;
-  const timeMs = decelerated
-    ? times[peak]! + 0.15 * (times[trough]! - times[peak]!)
-    : interpolatePeakTime(times, speed, peak);
+
+  const handsAtPeak = hands[peakIdx]?.y ?? 0;
+  const handsAtStrike = hands[strikeIdx]?.y ?? 0;
+  const peakIsFollowThrough = handsAtPeak < handsAtStrike - 0.008;
+  const decelIdx = decelerationOnsetIndex(speed, peakIdx);
+
+  let impactIndex = peakIdx;
+  if (peakIsFollowThrough || strikeIdx < peakIdx - 1) {
+    impactIndex = Math.min(strikeIdx, decelIdx);
+  } else {
+    impactIndex = decelIdx;
+  }
+  impactIndex = clamp(impactIndex, searchStart, peakIdx);
+
   return {
-    index: nearestFrame(times, timeMs),
-    timeMs,
+    index: impactIndex,
+    timeMs: times[impactIndex]!,
     peakSpeed,
+    peakIndex: peakIdx,
   };
 }
 
@@ -323,7 +458,7 @@ function audioImpact(
   samples: AudioSample[],
   offsetMs: number,
   gateMs?: { center: number; window: number },
-): { timeMs: number; strength: number } | null {
+): { timeMs: number; strength: number; frameIndex: number } | null {
   const times = samples.map((sample) => sample.timeMs - offsetMs);
   const onset = samples.map((sample, i) => {
     if (i === 0) {
@@ -356,15 +491,22 @@ function audioImpact(
   if (strength < 0.008 && samples[peak]!.rms < AUDIO_SILENCE) {
     return null;
   }
+  const timeMs = interpolatePeakTime(times, onset, peak);
   return {
-    timeMs: interpolatePeakTime(times, onset, peak),
+    timeMs,
     strength,
+    frameIndex: peak,
   };
 }
 
 function fuseImpact(
-  motion: { index: number; timeMs: number; peakSpeed: number } | null,
-  audio: { timeMs: number; strength: number } | null,
+  motion: {
+    index: number;
+    timeMs: number;
+    peakSpeed: number;
+    peakIndex: number;
+  } | null,
+  audio: { timeMs: number; strength: number; frameIndex: number } | null,
   times: number[],
 ): {
   index: number;
@@ -394,20 +536,30 @@ function fuseImpact(
     };
   }
 
-  const dt = Math.abs(motion!.timeMs - audio!.timeMs);
-  if (dt <= FUSE_TIGHT_MS) {
-    const timeMs = audio!.timeMs * 0.7 + motion!.timeMs * 0.3;
+  const dt = audio!.timeMs - motion!.timeMs;
+  if (dt > FUSE_OK_MS) {
     return {
-      index: nearestFrame(times, timeMs),
-      timeMs,
+      index: motion!.index,
+      timeMs: motion!.timeMs,
+      candidate: derived(
+        "motion",
+        0.78,
+        true,
+        "audio transient late; motion strike",
+      ),
+    };
+  }
+  if (Math.abs(dt) <= FUSE_TIGHT_MS) {
+    return {
+      index: motion!.index,
+      timeMs: motion!.timeMs,
       candidate: derived("fused", 0.92, true, "audio and motion agree"),
     };
   }
-  if (dt <= FUSE_OK_MS) {
-    const timeMs = audio!.timeMs * 0.65 + motion!.timeMs * 0.35;
+  if (Math.abs(dt) <= FUSE_OK_MS) {
     return {
-      index: nearestFrame(times, timeMs),
-      timeMs,
+      index: motion!.index,
+      timeMs: motion!.timeMs,
       candidate: derived(
         "fused",
         0.78,
@@ -416,17 +568,17 @@ function fuseImpact(
       ),
     };
   }
-  if (audio!.strength > 0.04) {
+  if (audio!.strength > 0.04 && dt < -FUSE_OK_MS) {
     return {
       index: nearestFrame(times, audio!.timeMs),
       timeMs: audio!.timeMs,
-      candidate: derived("audio", 0.5, true, "audio and motion disagree"),
+      candidate: derived("audio", 0.5, true, "audio leads motion"),
     };
   }
   return {
     index: motion!.index,
     timeMs: motion!.timeMs,
-    candidate: derived("motion", 0.48, true, "audio and motion disagree"),
+    candidate: derived("motion", 0.72, true, "motion strike"),
   };
 }
 
@@ -434,11 +586,136 @@ function stillAt(kin: Kinematics, index: number) {
   return Boolean(kin.hands[index]) && (kin.speed[index] ?? 0) <= kin.stillSpeed;
 }
 
-function lastStillnessBefore(kin: Kinematics, before: number) {
+function findTop(
+  kin: Kinematics,
+  impactIndex: number,
+  effectiveFps: number,
+): { index: number | null; confidence: number; reason: string | null } {
+  const { speed, hands, times } = kin;
+  const minTime = times[impactIndex]! - MIN_TOP_BEFORE_IMPACT_MS;
+
+  let globalHeightPeak = -Infinity;
+  for (let i = 0; i < impactIndex; i++) {
+    globalHeightPeak = Math.max(globalHeightPeak, invertedHandHeight(hands, i));
+  }
+
+  let best: {
+    index: number;
+    confidence: number;
+    reason: string;
+  } | null = null;
+
+  for (let i = impactIndex - 1; i >= 2; i--) {
+    if (times[i]! > minTime) {
+      continue;
+    }
+    if (!isLocalMinimum(speed, i)) {
+      continue;
+    }
+
+    const windowStartTime = times[i]! - TOP_HEIGHT_WINDOW_MS;
+    let wStart = 0;
+    for (let j = i; j >= 0; j--) {
+      if (times[j]! <= windowStartTime) {
+        wStart = j;
+        break;
+      }
+    }
+
+    let heightPeakIdx = i;
+    let heightPeak = invertedHandHeight(hands, i);
+    for (let j = wStart; j <= i; j++) {
+      const h = invertedHandHeight(hands, j);
+      if (h > heightPeak) {
+        heightPeak = h;
+        heightPeakIdx = j;
+      }
+    }
+
+    if (Math.abs(heightPeakIdx - i) > 2) {
+      continue;
+    }
+
+    if (invertedHandHeight(hands, i) < globalHeightPeak * 0.92) {
+      continue;
+    }
+
+    let maxSpeedAfter = 0;
+    for (let j = i + 1; j <= impactIndex; j++) {
+      maxSpeedAfter = Math.max(maxSpeedAfter, speed[j]!);
+    }
+    if (maxSpeedAfter < kin.stillSpeed * 1.4) {
+      continue;
+    }
+
+    let heightRange = 0;
+    for (let j = wStart; j <= i; j++) {
+      const point = hands[j];
+      const peakPoint = hands[heightPeakIdx];
+      if (point && peakPoint) {
+        heightRange = Math.max(heightRange, Math.abs(point.y - peakPoint.y));
+      }
+    }
+
+    const flatTop = heightRange < 0.012 && effectiveFps <= 32;
+    best = {
+      index: i,
+      confidence: flatTop ? 0.55 : 0.82,
+      reason: flatTop ? "30fps top ambiguity" : "hand-path reversal",
+    };
+    break;
+  }
+
+  if (!best) {
+    return {
+      index: null,
+      confidence: 0,
+      reason: "no speed minimum before impact",
+    };
+  }
+  return best;
+}
+
+function findTakeaway(kin: Kinematics, topIndex: number) {
+  const threshold = kin.stillSpeed * 1.12;
+  for (let i = topIndex - 1; i >= 1; i--) {
+    if (kin.speed[i]! <= threshold && kin.speed[i + 1]! > threshold) {
+      return i + 1;
+    }
+  }
+  for (let i = topIndex - 1; i >= 1; i--) {
+    if (kin.speed[i]! > threshold) {
+      return i;
+    }
+  }
+  return Math.max(0, topIndex - 1);
+}
+
+function monotonicHeightRise(
+  kin: Kinematics,
+  fromIndex: number,
+  toIndex: number,
+) {
+  let prev = invertedHandHeight(kin.hands, fromIndex);
+  for (let i = fromIndex + 1; i <= toIndex; i++) {
+    const cur = invertedHandHeight(kin.hands, i);
+    if (cur === -Infinity) {
+      continue;
+    }
+    if (cur < prev - 0.006) {
+      return false;
+    }
+    prev = Math.max(prev, cur);
+  }
+  return true;
+}
+
+function stillnessBeforeTakeaway(kin: Kinematics, takeawayIndex: number) {
   let end = -1;
-  for (let i = before; i >= 1; i--) {
+  for (let i = takeawayIndex - 1; i >= 1; i--) {
     if (stillAt(kin, i)) {
       end = i;
+    } else if (end >= 0) {
       break;
     }
   }
@@ -449,97 +726,20 @@ function lastStillnessBefore(kin: Kinematics, before: number) {
   while (start > 0 && stillAt(kin, start - 1)) {
     start -= 1;
   }
-  const duration = kin.times[end]! - kin.times[start]!;
-  if (duration < STILL_WINDOW_MS && start > 0) {
+  if (kin.times[end]! - kin.times[start]! < STILLNESS_MS) {
+    return null;
+  }
+  if (!monotonicHeightRise(kin, end, takeawayIndex)) {
     return null;
   }
   return { start, end };
 }
 
-function distTo(
-  point: { x: number; y: number } | null,
-  origin: { x: number; y: number },
-) {
-  if (!point) {
-    return 0;
-  }
-  return Math.hypot(point.x - origin.x, point.y - origin.y);
-}
-
-function findTop(kin: Kinematics, impactIndex: number) {
-  const impactHands = kin.hands[impactIndex];
-  if (!impactHands) {
-    return null;
-  }
-  const minGapMs = 180;
-  for (let i = impactIndex - 1; i >= 2; i--) {
-    if (kin.times[impactIndex]! - kin.times[i]! < minGapMs) {
-      continue;
-    }
-    const point = kin.hands[i];
-    if (!point) {
-      continue;
-    }
-    const dist = distTo(point, impactHands);
-    const prevDist = distTo(kin.hands[i - 1], impactHands);
-    const nextDist = distTo(kin.hands[i + 1], impactHands);
-    if (dist >= 0.05 && dist >= prevDist && dist >= nextDist) {
-      return i;
-    }
-  }
-  return null;
-}
-
-function quietestWindow(kin: Kinematics, from: number, to: number) {
-  if (to - from < 2) {
-    return null;
-  }
-  let bestStart = from;
-  let bestScore = Infinity;
-  const windowMs = 120;
-  for (let start = from; start < to; start++) {
-    let end = start;
-    while (
-      end + 1 <= to &&
-      kin.times[end + 1]! - kin.times[start]! <= windowMs
-    ) {
-      end += 1;
-    }
-    if (end <= start) {
-      continue;
-    }
-    let sum = 0;
-    let count = 0;
-    for (let i = start; i <= end; i++) {
-      if (!kin.hands[i]) {
-        continue;
-      }
-      sum += kin.speed[i]!;
-      count += 1;
-    }
-    if (count < 2) {
-      continue;
-    }
-    const score = sum / count;
-    if (score < bestScore) {
-      bestScore = score;
-      bestStart = start;
-    }
-  }
-  let end = bestStart;
-  while (
-    end + 1 <= to &&
-    kin.times[end + 1]! - kin.times[bestStart]! <= windowMs
-  ) {
-    end += 1;
-  }
-  return { start: bestStart, end };
-}
-
 function dropWaggleToAddress(kin: Kinematics, topIndex: number) {
   let cursor = topIndex;
   while (cursor > 2) {
-    const still = lastStillnessBefore(kin, cursor - 1);
+    const takeawayGuess = findTakeaway(kin, cursor);
+    const still = stillnessBeforeTakeaway(kin, takeawayGuess);
     if (!still) {
       break;
     }
@@ -571,30 +771,30 @@ function dropWaggleToAddress(kin: Kinematics, topIndex: number) {
       return still;
     }
   }
-  const fallbackFrom = kin.times.findIndex(
-    (time) => kin.times[topIndex]! - time <= 2500,
-  );
-  return quietestWindow(
-    kin,
-    Math.max(0, fallbackFrom),
-    Math.max(1, topIndex - 1),
-  );
+  return stillnessBeforeTakeaway(kin, findTakeaway(kin, topIndex));
 }
 
-function findFinish(kin: Kinematics, impactIndex: number, peakSpeed: number) {
-  const threshold = Math.max(STILL_SPEED, peakSpeed * 0.18);
-  let movingEnd = impactIndex;
+function findFinish(kin: Kinematics, impactIndex: number) {
+  const threshold = kin.stillSpeed;
   for (let i = impactIndex + 1; i < kin.speed.length; i++) {
     if (kin.speed[i]! > threshold) {
-      movingEnd = i;
+      continue;
     }
-  }
-  for (let i = movingEnd; i < kin.speed.length; i++) {
-    if (stillAt(kin, i) && kin.times[i]! - kin.times[movingEnd]! >= 40) {
+    let settled = true;
+    for (let j = i; j < Math.min(i + 3, kin.speed.length); j++) {
+      if (kin.speed[j]! > threshold) {
+        settled = false;
+        break;
+      }
+    }
+    if (settled) {
       return i;
     }
   }
-  return Math.max(movingEnd, Math.min(kin.speed.length - 1, impactIndex + 1));
+  return Math.max(
+    impactIndex + 1,
+    Math.min(kin.speed.length - 1, impactIndex + 1),
+  );
 }
 
 function emptyPhases(reason: string, fps: Derived<number>): SwingPhases {
@@ -674,18 +874,28 @@ export function findSwingPhases(
 
   const handedness = options.handedness === "left" ? "left" : "right";
   const kin = kinematics(frames, handedness);
+  const capturePath = options.capturePath ?? "upload";
   const offset =
-    options.avClockOffsetMs ??
-    AV_CLOCK_OFFSET_MS[options.capturePath ?? "upload"];
+    options.avClockOffsetMs ?? AV_CLOCK_OFFSET_MS[capturePath] ?? 0;
   const samples = options.audioSamples;
   const motion = motionImpact(kin);
   const audio = hasAudio(samples)
     ? audioImpact(
         samples,
         offset,
-        motion ? { center: motion.timeMs, window: 220 } : undefined,
+        motion ? { center: motion.timeMs, window: 280 } : undefined,
       )
     : null;
+
+  if (options.diagnostics) {
+    options.diagnostics.motionPeakFrameIndex = motion?.peakIndex ?? null;
+    options.diagnostics.motionImpactFrameIndex = motion?.index ?? null;
+    options.diagnostics.audioTransientFrameIndex = audio?.frameIndex ?? null;
+    if (motion && audio) {
+      options.diagnostics.measuredAvOffsetMs = audio.timeMs - motion.timeMs;
+    }
+  }
+
   const fused = fuseImpact(motion, audio, kin.times);
   if (!fused.candidate.valid) {
     return {
@@ -703,7 +913,8 @@ export function findSwingPhases(
     fused.candidate.reason,
   );
 
-  const topIndex = findTop(kin, impactIndex);
+  const topResult = findTop(kin, impactIndex, fps.value);
+  const topIndex = topResult.index;
   if (topIndex === null || topIndex >= impactIndex) {
     return {
       address: invalidMark("could not find top"),
@@ -720,42 +931,38 @@ export function findSwingPhases(
 
   const still = dropWaggleToAddress(kin, topIndex);
   let addressIndex = still?.end ?? Math.max(0, topIndex - 2);
-  let takeawayIndex = Math.min(topIndex, addressIndex + 1);
+  let takeawayIndex = findTakeaway(kin, topIndex);
   if (takeawayIndex >= topIndex) {
     takeawayIndex = Math.max(0, topIndex - 1);
   }
   if (addressIndex >= takeawayIndex) {
     addressIndex = Math.max(0, takeawayIndex - 1);
   }
-  const finishIndex = findFinish(
-    kin,
-    impactIndex,
-    motion?.peakSpeed ?? kin.speed[impactIndex] ?? 1,
-  );
+  const finishIndex = findFinish(kin, impactIndex);
 
   const address = mark(
     addressIndex,
     kin.times[addressIndex]!,
-    still ? 0.8 : 0.45,
+    still ? 0.85 : 0.45,
     still ? "stillness window before takeaway" : "no clear stillness window",
   );
   const takeaway = mark(
     takeawayIndex,
     kin.times[takeawayIndex]!,
-    still ? 0.78 : 0.45,
-    still ? "motion after address stillness" : "estimated from top",
+    still ? 0.8 : 0.45,
+    still ? "hand speed above address noise floor" : "estimated from top",
   );
   const top = mark(
     topIndex,
     kin.times[topIndex]!,
-    0.82,
-    "hand-path direction reversal",
+    topResult.confidence,
+    topResult.reason,
   );
   const finish = mark(
     finishIndex,
     kin.times[finishIndex]!,
     0.7,
-    "follow-through settled",
+    "hand speed below threshold after impact",
   );
 
   const startMs = Math.max(0, address.timeMs - TRIM_PAD_MS);
