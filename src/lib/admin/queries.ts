@@ -6,6 +6,14 @@ import {
   type TestSwingListItem,
   type TestSwingRow,
 } from "@/lib/admin/test-swings";
+import {
+  getLatestScorerRun,
+  listContentVersionOptions,
+  loadPublishedBands,
+  scoreClip,
+  summarizeScorerRows,
+  type ScorerRunResult,
+} from "@/lib/admin/scorer";
 import type { VersionedRow } from "@/lib/admin/versioning";
 import { phasesFromUnknown } from "@/lib/engine/phases";
 import { angleFromUnknown } from "@/lib/engine/angle";
@@ -99,6 +107,10 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
           ? (raw.orientation as OrientationSample[])
           : null,
         metrics: swingMetricsFromUnknown(raw.metrics),
+        phase_marks:
+          raw.phase_marks && typeof raw.phase_marks === "object"
+            ? (raw.phase_marks as TestSwingKeypointsRow["phase_marks"])
+            : null,
       });
     }
   }
@@ -115,4 +127,43 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
     });
   }
   return items;
+}
+
+export async function getScorerPageData(): Promise<{
+  result: ScorerRunResult | null;
+  latestRun: Awaited<ReturnType<typeof getLatestScorerRun>>;
+  contentVersions: Awaited<ReturnType<typeof listContentVersionOptions>>;
+}> {
+  const [latestRun, contentVersions, bandsLoad] = await Promise.all([
+    getLatestScorerRun(),
+    listContentVersionOptions(),
+    loadPublishedBands(),
+  ]);
+
+  const swings = await listTestSwings();
+  const withKeypoints = swings.filter((swing) => swing.keypoints);
+
+  if (withKeypoints.length === 0) {
+    return { result: null, latestRun, contentVersions };
+  }
+
+  const rows = withKeypoints.map((swing) =>
+    scoreClip({
+      swing,
+      keypoints: {
+        ...swing.keypoints!,
+        phase_marks: swing.keypoints!.phase_marks,
+      },
+      bands: bandsLoad.bands,
+    }),
+  );
+  const summary = summarizeScorerRows(rows);
+  summary.contentVersionId = bandsLoad.contentVersionId;
+  summary.engineGitSha = latestRun?.engine_git_sha ?? "preview";
+
+  return {
+    result: { rows, summary },
+    latestRun,
+    contentVersions,
+  };
 }

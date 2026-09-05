@@ -41,6 +41,10 @@ export type TestSwingRow = TestSwingLabels & {
   storage_path: string;
 };
 
+export type GroundTruthPhaseMarks = Partial<
+  Record<"address" | "takeaway" | "top" | "impact" | "finish", number>
+>;
+
 export type TestSwingKeypointsRow = {
   id: string;
   created_at: string;
@@ -54,6 +58,7 @@ export type TestSwingKeypointsRow = {
   normalized_keypoints: PoseFrame[] | null;
   orientation: OrientationSample[] | null;
   metrics: StoredSwingMetrics | null;
+  phase_marks: GroundTruthPhaseMarks | null;
 };
 
 export type TestSwingListItem = TestSwingRow & {

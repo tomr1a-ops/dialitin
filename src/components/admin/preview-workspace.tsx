@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SkeletonOverlay } from "@/components/pose/skeleton-overlay";
 import { DtlMetricPhaseStill } from "@/components/admin/dtl-metric-phase-still";
 import { MetricPhaseStill } from "@/components/admin/metric-phase-still";
 import { PhaseDiagnosticChart } from "@/components/admin/phase-diagnostic-chart";
-import type { TestSwingListItem } from "@/lib/admin/test-swings";
+import type { GroundTruthPhaseMarks, TestSwingListItem } from "@/lib/admin/test-swings";
 import type { FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
 import type { DtlMetricKey } from "@/lib/engine/metrics/dtl";
 import { activeMetricSet } from "@/lib/engine/metrics/storage";
@@ -84,6 +84,22 @@ const PHASE_ORDER = [
   keyof Pick<SwingPhases, "address" | "takeaway" | "top" | "impact" | "finish">
 >;
 
+function nearestFrameIndex(keypoints: PoseFrame[], timeSec: number): number {
+  if (keypoints.length === 0) {
+    return 0;
+  }
+  let best = 0;
+  let bestDelta = Infinity;
+  for (let i = 0; i < keypoints.length; i++) {
+    const delta = Math.abs(keypoints[i]!.mediaTime - timeSec);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+  return best;
+}
+
 function phaseList(phases: SwingPhases) {
   return PHASE_ORDER.map((key) => ({ key, mark: phases[key] as PhaseMark }));
 }
@@ -98,9 +114,12 @@ export function PreviewWorkspace({
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const impactVideoRef = useRef<HTMLVideoElement>(null);
+  const [markBusy, setMarkBusy] = useState(false);
+  const [markMessage, setMarkMessage] = useState("");
   const selected =
     swings.find((swing) => swing.id === selectedId) ?? swings[0] ?? null;
   const pose = selected?.keypoints ?? null;
+  const phaseMarks = pose?.phase_marks ?? {};
   const diagnosis = useMemo(
     () => diagnose(pose?.keypoints ?? [], CONTENT_VERSION),
     [pose],
@@ -134,6 +153,44 @@ export function PreviewWorkspace({
   const angleMismatch = labeledAngleMismatch(selected?.angle, angle);
   const lastMediaTime = keypoints.at(-1)?.mediaTime;
   const duration = lastMediaTime && lastMediaTime > 0 ? lastMediaTime : 1;
+
+  async function markPhase(phase: keyof GroundTruthPhaseMarks) {
+    if (!selected?.id || !videoRef.current || keypoints.length === 0) {
+      return;
+    }
+    const frameIndex = nearestFrameIndex(
+      keypoints,
+      videoRef.current.currentTime,
+    );
+    const next = { ...phaseMarks, [phase]: frameIndex };
+    setMarkBusy(true);
+    setMarkMessage("");
+    try {
+      const res = await fetch(
+        `/api/admin/test-swings/${selected.id}/phase-marks`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phase_marks: next,
+            keypoint_id: pose?.id,
+          }),
+        },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error ?? "Could not save phase marks.");
+      }
+      setMarkMessage(`Marked ${phase} at frame ${frameIndex}.`);
+      router.refresh();
+    } catch (err) {
+      setMarkMessage(
+        err instanceof Error ? err.message : "Could not save phase marks.",
+      );
+    } finally {
+      setMarkBusy(false);
+    }
+  }
 
   useEffect(() => {
     const video = impactVideoRef.current;
@@ -177,6 +234,20 @@ export function PreviewWorkspace({
         </p>
       ) : (
         <>
+          {(selected.pro_label_fault_1 || selected.pro_label_fault_2) && (
+            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
+              <p className="text-xs uppercase tracking-wide text-white/45">
+                Pro labels
+              </p>
+              <p className="mt-1 text-white/85">
+                {selected.pro_label_fault_1 ?? "—"}
+                {selected.pro_label_fault_2
+                  ? ` · ${selected.pro_label_fault_2}`
+                  : ""}
+              </p>
+            </div>
+          )}
+
           <div className="relative overflow-hidden rounded-2xl bg-black">
             {selected.signed_url ? (
               <video
@@ -236,6 +307,32 @@ export function PreviewWorkspace({
                   Run pose on /admin/test-set to store phases.
                 </p>
               )}
+            </div>
+            <div className="mt-4 rounded-xl border border-white/10 bg-[#101916] p-3">
+              <h3 className="text-sm font-medium text-white/70">Mark phases</h3>
+              <p className="mt-1 text-xs text-white/45">
+                Scrub the clip, then click a phase to store the ground-truth
+                frame index on this keypoint row.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {PHASE_ORDER.map((phase) => (
+                  <button
+                    key={phase}
+                    type="button"
+                    disabled={markBusy || keypoints.length === 0}
+                    onClick={() => void markPhase(phase)}
+                    className="min-h-9 rounded-lg border border-white/15 px-3 text-xs uppercase tracking-wide text-white/80 disabled:opacity-40"
+                  >
+                    {phase}
+                    {phaseMarks[phase] !== undefined
+                      ? ` · f${phaseMarks[phase]}`
+                      : ""}
+                  </button>
+                ))}
+              </div>
+              {markMessage ? (
+                <p className="mt-2 text-xs text-white/55">{markMessage}</p>
+              ) : null}
             </div>
           </section>
 
