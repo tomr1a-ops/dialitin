@@ -16,7 +16,7 @@ export function AdminShell({
   return (
     <div className="min-h-dvh bg-[#0b1210] text-[#f4f7f2]">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-[#0b1210]/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <div>
             <Link
               href="/admin/content"
@@ -35,7 +35,7 @@ export function AdminShell({
             </button>
           </form>
         </div>
-        <nav className="mx-auto mt-3 flex max-w-5xl gap-2 overflow-x-auto pb-1">
+        <nav className="mx-auto mt-3 flex max-w-6xl gap-2 overflow-x-auto pb-1">
           {CONTENT_KINDS.map((kind) => (
             <Link
               key={kind}
@@ -51,9 +51,21 @@ export function AdminShell({
           >
             Snapshots
           </Link>
+          <Link
+            href="/admin/test-set"
+            className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-white/80"
+          >
+            Test set
+          </Link>
+          <Link
+            href="/admin/preview"
+            className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-white/80"
+          >
+            Preview
+          </Link>
         </nav>
       </header>
-      <div className="mx-auto max-w-5xl px-4 py-5">{children}</div>
+      <div className="mx-auto max-w-6xl px-4 py-5">{children}</div>
     </div>
   );
 }
