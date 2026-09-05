@@ -1,4 +1,8 @@
-export type PosePathId = "worker+GPU" | "worker+CPU" | "main-thread+CPU";
+export type PosePathId =
+  | "worker+GPU"
+  | "worker+CPU"
+  | "main-thread+GPU"
+  | "main-thread+CPU";
 
 export type PoseCapabilities = {
   moduleWorker: boolean;
@@ -15,6 +19,7 @@ export type PosePathPlan = {
 export const POSE_FALLBACK_ORDER: readonly PosePathPlan[] = [
   { id: "worker+GPU", backend: "worker", delegate: "GPU" },
   { id: "worker+CPU", backend: "worker", delegate: "CPU" },
+  { id: "main-thread+GPU", backend: "main-thread", delegate: "GPU" },
   { id: "main-thread+CPU", backend: "main-thread", delegate: "CPU" },
 ];
 

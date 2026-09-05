@@ -43,9 +43,9 @@ function attachHiddenVideo(video: HTMLVideoElement) {
   video.style.position = "fixed";
   video.style.left = "0";
   video.style.top = "0";
-  video.style.width = "2px";
-  video.style.height = "2px";
-  video.style.opacity = "0";
+  video.style.width = "32px";
+  video.style.height = "32px";
+  video.style.opacity = "0.01";
   video.style.pointerEvents = "none";
   document.body.appendChild(video);
 }

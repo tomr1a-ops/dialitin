@@ -62,11 +62,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
   });
 }
 
-async function createMainThreadLandmarker() {
+async function createMainThreadLandmarker(delegate: PoseDelegate) {
   const { wasmPath, modelPath } = pinnedFileset();
   const vision = await FilesetResolver.forVisionTasks(wasmPath);
   return PoseLandmarker.createFromOptions(vision, {
-    baseOptions: { modelAssetPath: modelPath, delegate: "CPU" },
+    baseOptions: { modelAssetPath: modelPath, delegate },
     ...LANDMARKER_OPTIONS,
   });
 }
@@ -207,15 +207,15 @@ async function startPath(plan: PosePathPlan): Promise<PoseRuntimeStart> {
   }
 
   const landmarker = await withTimeout(
-    createMainThreadLandmarker(),
+    createMainThreadLandmarker(plan.delegate),
     15000,
     "Main-thread pose init timed out",
   );
   return {
     runtime: new MainThreadPoseRuntime(landmarker),
     backend: "main-thread",
-    delegate: "CPU",
-    path: "main-thread+CPU",
+    delegate: plan.delegate,
+    path: plan.id,
   };
 }
 

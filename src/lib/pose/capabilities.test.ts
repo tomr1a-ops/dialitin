@@ -5,14 +5,19 @@ import {
 } from "@/lib/pose/capabilities";
 
 describe("posePathsToTry", () => {
-  test("tries Worker+GPU, then Worker+CPU, then main-thread+CPU", () => {
+  test("tries Worker+GPU, then Worker+CPU, then main-thread GPU/CPU", () => {
     expect(
       posePathsToTry({
         moduleWorker: true,
         webgl: true,
         offscreenCanvas: true,
       }).map((path) => path.id),
-    ).toEqual(["worker+GPU", "worker+CPU", "main-thread+CPU"]);
+    ).toEqual([
+      "worker+GPU",
+      "worker+CPU",
+      "main-thread+GPU",
+      "main-thread+CPU",
+    ]);
   });
 
   test("skips GPU when WebGL is missing and skips workers when they cannot load", () => {
@@ -30,7 +35,7 @@ describe("posePathsToTry", () => {
         webgl: true,
         offscreenCanvas: false,
       }).map((path) => path.id),
-    ).toEqual(["main-thread+CPU"]);
+    ).toEqual(["main-thread+GPU", "main-thread+CPU"]);
   });
 
   test("does not treat a GPU ModuleFactory failure as a worker-script miss", () => {
