@@ -1,16 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { getCaptureSession } from "@/lib/capture/session";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCaptureSession, updateCaptureSession } from "@/lib/capture/session";
 import type { IngestResult } from "@/lib/capture/types";
+import { ingestClip } from "@/lib/ingest/ingest-clip";
+import { explainPoseFailure } from "@/lib/pose/errors";
 import { POSE_CONNECTIONS } from "@/lib/pose/connections";
 import { nearestPoseFrame } from "@/lib/pose/nearest-frame";
+import { formatPoseStatus, type PoseStatus } from "@/lib/pose/status";
 import type { PoseFrame } from "@/lib/pose/types";
 
 const SKELETON = "#c8f542";
 const FLASH_SECONDS = 1.5;
 const REST_OPACITY = 0.3;
+let poseInFlight: Promise<void> | null = null;
 
 function readSession() {
   if (typeof window === "undefined") {
@@ -94,17 +98,66 @@ function drawSkeleton(
 }
 
 export function RevealView() {
-  const [result] = useState<IngestResult | null>(readSession);
+  const session = readSession();
+  const [result, setResult] = useState<IngestResult | null>(
+    session?.result ?? null,
+  );
+  const [poseError, setPoseError] = useState(session?.poseError ?? null);
+  const [status, setStatus] = useState<PoseStatus | null>(
+    session?.result ? { phase: "done" } : null,
+  );
   const [playing, setPlaying] = useState(false);
   const [slowMo, setSlowMo] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const loadAtRef = useRef<number | null>(null);
+  const runPose = useCallback(() => {
+    if (poseInFlight) {
+      return poseInFlight;
+    }
+    poseInFlight = (async () => {
+      const current = getCaptureSession();
+      if (!current) {
+        return;
+      }
+      setPoseError(null);
+      setResult(null);
+      updateCaptureSession({ result: null, poseError: null });
+      setStatus({ phase: "loading-model", loadedBytes: 0, totalBytes: 1 });
+      try {
+        const next = await ingestClip(current.clip, {
+          capturePath: current.capturePath,
+          fileName: current.fileName,
+          audioContext: current.audioContext,
+          orientationSamples: current.orientationSamples,
+          grantedCamera: current.grantedCamera,
+          onProgress: setStatus,
+        });
+        setResult(next);
+        setStatus({ phase: "done" });
+        updateCaptureSession({ result: next, poseError: null });
+      } catch (error) {
+        const explained = explainPoseFailure(error);
+        setPoseError(explained);
+        setStatus(null);
+        updateCaptureSession({ result: null, poseError: explained });
+      }
+    })().finally(() => {
+      poseInFlight = null;
+    });
+    return poseInFlight;
+  }, []);
 
   useEffect(() => {
     loadAtRef.current = performance.now();
-  }, []);
+  }, [result]);
+
+  useEffect(() => {
+    if (session && !session.result && !session.poseError) {
+      void runPose();
+    }
+  }, [runPose, session]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -143,7 +196,7 @@ export function RevealView() {
     video.playbackRate = slowMo ? 0.25 : 1;
   }, [slowMo]);
 
-  if (!result) {
+  if (!session) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center px-6">
         <p className="text-center text-white/70">
@@ -159,7 +212,8 @@ export function RevealView() {
     );
   }
 
-  const duration = Math.max(result.durationSeconds, 0.001);
+  const duration = Math.max(result?.durationSeconds ?? 0.001, 0.001);
+  const statusText = status ? formatPoseStatus(status) : "";
 
   async function togglePlay() {
     const video = videoRef.current;
@@ -198,7 +252,7 @@ export function RevealView() {
         <video
           ref={videoRef}
           className="aspect-[9/16] w-full object-contain"
-          src={result.clipUrl}
+          src={session.clipUrl}
           playsInline
           preload="auto"
           onTimeUpdate={(event) =>
@@ -211,6 +265,33 @@ export function RevealView() {
           className="pointer-events-none absolute inset-0 h-full w-full"
         />
       </div>
+
+      {statusText ? (
+        <p
+          className="mt-3 text-sm leading-relaxed text-white/80"
+          data-pose-status={status?.phase}
+        >
+          {statusText}
+        </p>
+      ) : null}
+
+      {poseError ? (
+        <div className="mt-3 space-y-3" data-pose-error="1">
+          <p className="text-sm font-semibold leading-relaxed text-[#f3c36a]">
+            {poseError.userMessage}
+          </p>
+          <p className="text-[0.72rem] leading-relaxed text-white/45">
+            {poseError.technicalReason}
+          </p>
+          <button
+            type="button"
+            className="min-h-11 w-full rounded-full bg-[#c8f542] text-sm font-semibold text-[#0b1210]"
+            onClick={() => void runPose()}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex gap-2">
         <button
@@ -247,7 +328,7 @@ export function RevealView() {
       </label>
 
       <div className="relative mt-3 h-8 overflow-hidden rounded-md bg-white/8">
-        {result.frameTimestamps.map((time, index) => (
+        {(result?.frameTimestamps ?? []).map((time, index) => (
           <button
             key={`${time}-${index}`}
             type="button"
@@ -261,22 +342,26 @@ export function RevealView() {
 
       <footer
         className="mt-5 space-y-1 text-[0.72rem] leading-relaxed text-white/50"
-        data-pose-fps={result.poseFpsProcessed.toFixed(2)}
-        data-resolution={`${result.resolution.width}x${result.resolution.height}`}
-        data-capture-path={result.capturePath}
-        data-pose-backend={result.poseBackend}
-        data-pose-delegate={result.poseDelegate}
-        data-pose-watchdog={result.poseWatchdogHit ? "1" : "0"}
+        data-pose-fps={result ? result.poseFpsProcessed.toFixed(2) : ""}
+        data-resolution={
+          result ? `${result.resolution.width}x${result.resolution.height}` : ""
+        }
+        data-capture-path={session.capturePath}
+        data-pose-backend={result?.poseBackend ?? ""}
+        data-pose-delegate={result?.poseDelegate ?? ""}
+        data-pose-path={result?.posePath ?? ""}
+        data-pose-watchdog={result?.poseWatchdogHit ? "1" : "0"}
       >
         <p>
-          {result.capturePath} · {result.resolution.width}×
-          {result.resolution.height} · {result.poseFpsProcessed.toFixed(2)}{" "}
-          fps-processed
+          {session.capturePath}
+          {result
+            ? ` · ${result.resolution.width}×${result.resolution.height} · ${result.posePath} · ${result.poseFpsProcessed.toFixed(2)} fps-processed`
+            : " · waiting for pose"}
         </p>
         <p>
-          {result.frameCount} timestamps · {result.keypoints.length} pose frames
-          · {result.poseBackend}/{result.poseDelegate}
-          {result.poseWatchdogHit ? " · watchdog" : ""}
+          {result
+            ? `${result.frameCount} timestamps · ${result.keypoints.length} pose frames · ${result.poseBackend}/${result.poseDelegate}${result.poseWatchdogHit ? " · watchdog" : ""}`
+            : "Clip stays in memory — pose can retry without recording again."}
         </p>
       </footer>
     </main>

@@ -1,7 +1,9 @@
 import { POSE_SHORT_SIDE, type CropBox } from "@/lib/pose/types";
 
+export type PoseWorkCanvas = OffscreenCanvas | HTMLCanvasElement;
+
 export type PoseWorkFrame = {
-  canvas: OffscreenCanvas;
+  canvas: PoseWorkCanvas;
   width: number;
   height: number;
   scale: number;
@@ -19,9 +21,42 @@ export function poseDownscaleSize(width: number, height: number) {
   };
 }
 
+export function createPoseWorkCanvas(): PoseWorkCanvas {
+  if (typeof OffscreenCanvas !== "undefined") {
+    try {
+      const canvas = new OffscreenCanvas(2, 2);
+      if (canvas.getContext("2d")) {
+        return canvas;
+      }
+    } catch {
+      // Safari can expose the constructor without a usable 2D context.
+    }
+  }
+  if (typeof document === "undefined") {
+    throw new Error("OffscreenCanvas is unavailable.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  if (!canvas.getContext("2d")) {
+    throw new Error("OffscreenCanvas is unavailable.");
+  }
+  return canvas;
+}
+
+function canvas2d(
+  canvas: PoseWorkCanvas,
+): OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D {
+  const context = canvas.getContext("2d");
+  if (!context || !("drawImage" in context)) {
+    throw new Error("OffscreenCanvas is unavailable.");
+  }
+  return context;
+}
+
 export function drawVideoToPoseCanvas(
   video: HTMLVideoElement,
-  canvas: OffscreenCanvas,
+  canvas: PoseWorkCanvas,
 ): PoseWorkFrame {
   const frameWidth = video.videoWidth;
   const frameHeight = video.videoHeight;
@@ -30,11 +65,7 @@ export function drawVideoToPoseCanvas(
     canvas.width = size.width;
     canvas.height = size.height;
   }
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("OffscreenCanvas is unavailable.");
-  }
-  context.drawImage(video, 0, 0, size.width, size.height);
+  canvas2d(canvas).drawImage(video, 0, 0, size.width, size.height);
   return {
     canvas,
     width: size.width,
@@ -45,25 +76,20 @@ export function drawVideoToPoseCanvas(
   };
 }
 
-export function grabCanvasBitmap(
-  canvas: OffscreenCanvas,
+export async function grabCanvasBitmap(
+  canvas: PoseWorkCanvas,
   crop: CropBox | null,
-): ImageBitmap {
+): Promise<ImageBitmap> {
   const source = crop ?? {
     x: 0,
     y: 0,
     width: canvas.width,
     height: canvas.height,
   };
-  const dest = new OffscreenCanvas(
-    Math.max(2, Math.round(source.width)),
-    Math.max(2, Math.round(source.height)),
-  );
-  const context = dest.getContext("2d");
-  if (!context) {
-    throw new Error("OffscreenCanvas is unavailable.");
-  }
-  context.drawImage(
+  const dest = createPoseWorkCanvas();
+  dest.width = Math.max(2, Math.round(source.width));
+  dest.height = Math.max(2, Math.round(source.height));
+  canvas2d(dest).drawImage(
     canvas,
     source.x,
     source.y,
@@ -74,5 +100,12 @@ export function grabCanvasBitmap(
     dest.width,
     dest.height,
   );
-  return dest.transferToImageBitmap();
+  if ("transferToImageBitmap" in dest) {
+    try {
+      return dest.transferToImageBitmap();
+    } catch {
+      // iPhone Safari can reject transferToImageBitmap on some canvases.
+    }
+  }
+  return createImageBitmap(dest);
 }

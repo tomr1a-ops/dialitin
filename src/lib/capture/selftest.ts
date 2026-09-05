@@ -1,7 +1,7 @@
-import { ingestClip } from "@/lib/ingest/ingest-clip";
 import { acquireWakeLock, startMediaRecording } from "@/lib/capture/media";
 import { startOrientationCapture } from "@/lib/capture/orientation";
-import type { IngestResult, OrientationSample } from "@/lib/capture/types";
+import type { CaptureSession } from "@/lib/capture/session";
+import type { OrientationSample } from "@/lib/capture/types";
 
 function drawTestFrame(ctx: CanvasRenderingContext2D, frame: number) {
   ctx.fillStyle = `hsl(${frame % 360} 65% 35%)`;
@@ -11,7 +11,7 @@ function drawTestFrame(ctx: CanvasRenderingContext2D, frame: number) {
   ctx.fillText(`SwingRead selftest ${frame}`, 36, 80);
 }
 
-export async function runInAppPipelineSelftest(): Promise<IngestResult> {
+export async function runInAppPipelineSelftest(): Promise<CaptureSession> {
   const canvas = document.createElement("canvas");
   canvas.width = 1280;
   canvas.height = 720;
@@ -59,10 +59,14 @@ export async function runInAppPipelineSelftest(): Promise<IngestResult> {
     await wakeLock.release();
   }
 
-  return ingestClip(blob, {
+  return {
+    clip: blob,
+    clipUrl: URL.createObjectURL(blob),
     capturePath: "in-app",
     orientationSamples,
     fileName: "selftest.webm",
     grantedCamera: { width: 1280, height: 720, frameRate: 30 },
-  });
+    result: null,
+    poseError: null,
+  };
 }

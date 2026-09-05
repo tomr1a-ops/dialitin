@@ -22,9 +22,8 @@ import {
   isClipTooLong,
   readClipDurationSeconds,
 } from "@/lib/ingest/duration";
-import { ingestClip } from "@/lib/ingest/ingest-clip";
 
-type Phase = "choose" | "countdown" | "recording" | "reading" | "error";
+type Phase = "choose" | "countdown" | "recording" | "error";
 
 export function CaptureView() {
   const router = useRouter();
@@ -43,7 +42,6 @@ export function CaptureView() {
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(SELF_TIMER_SECONDS);
   const [recordSeconds, setRecordSeconds] = useState(0);
-  const [readProgress, setReadProgress] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -77,32 +75,24 @@ export function CaptureView() {
     }
   }
 
-  async function finishIngest(
+  function openReveal(
     clip: Blob,
     capturePath: "upload" | "in-app",
     fileName?: string,
     audioContext?: AudioContext,
   ) {
-    setPhase("reading");
-    setReadProgress(0);
-    const result = await ingestClip(clip, {
+    setCaptureSession({
+      clip,
+      clipUrl: URL.createObjectURL(clip),
       capturePath,
       fileName,
       audioContext,
       orientationSamples:
         capturePath === "in-app" ? orientationSamplesRef.current : [],
       grantedCamera: grantedCameraRef.current,
-      onProgress({ currentTime, duration, phase }) {
-        if (phase === "pose-init") {
-          setReadProgress(0);
-          return;
-        }
-        if (Number.isFinite(duration) && duration > 0) {
-          setReadProgress(Math.min(1, currentTime / duration));
-        }
-      },
+      result: null,
+      poseError: null,
     });
-    setCaptureSession(result);
     router.push("/reveal");
   }
 
@@ -119,7 +109,7 @@ export function CaptureView() {
         setPhase("choose");
         return;
       }
-      await finishIngest(file, "upload", file.name, audioContext);
+      openReveal(file, "upload", file.name, audioContext);
     } catch (caught) {
       setPhase("choose");
       setError(
@@ -181,7 +171,7 @@ export function CaptureView() {
       const blob = await recording.result;
       window.clearInterval(tick);
       stopLive();
-      await finishIngest(blob, "in-app", "in-app-recording", audioContext);
+      openReveal(blob, "in-app", "in-app-recording", audioContext);
     } catch (caught) {
       stopLive();
       setPhase("choose");
@@ -290,21 +280,6 @@ export function CaptureView() {
             >
               Stop
             </button>
-          </div>
-        ) : null}
-
-        {phase === "reading" ? (
-          <div className="mt-16 text-center">
-            <p className="text-lg font-semibold">Reading your swing…</p>
-            <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full bg-[#c8f542]"
-                style={{ width: `${Math.round(readProgress * 100)}%` }}
-              />
-            </div>
-            <p className="mt-3 text-sm text-white/55">
-              Streaming frames and pose — the file stays on disk.
-            </p>
           </div>
         ) : null}
 

@@ -1,15 +1,39 @@
-import type { IngestResult } from "@/lib/capture/types";
+import type {
+  CapturePath,
+  IngestResult,
+  OrientationSample,
+} from "@/lib/capture/types";
+import type { PoseUserError } from "@/lib/pose/errors";
 
-let current: IngestResult | null = null;
+export type CaptureSession = {
+  clip: Blob;
+  clipUrl: string;
+  capturePath: CapturePath;
+  orientationSamples: OrientationSample[];
+  grantedCamera?: MediaTrackSettings;
+  fileName?: string;
+  audioContext?: AudioContext;
+  result: IngestResult | null;
+  poseError: PoseUserError | null;
+};
 
-export function setCaptureSession(result: IngestResult) {
-  if (current && current.clipUrl !== result.clipUrl) {
+let current: CaptureSession | null = null;
+
+export function setCaptureSession(session: CaptureSession) {
+  if (current && current.clipUrl !== session.clipUrl) {
     URL.revokeObjectURL(current.clipUrl);
   }
-  current = result;
+  current = session;
 }
 
-export function getCaptureSession(): IngestResult | null {
+export function updateCaptureSession(patch: Partial<CaptureSession>) {
+  if (!current) {
+    return;
+  }
+  current = { ...current, ...patch };
+}
+
+export function getCaptureSession(): CaptureSession | null {
   return current;
 }
 
@@ -18,4 +42,16 @@ export function clearCaptureSession() {
     URL.revokeObjectURL(current.clipUrl);
   }
   current = null;
+}
+
+export function sessionFromIngestResult(result: IngestResult): CaptureSession {
+  return {
+    clip: result.clip,
+    clipUrl: result.clipUrl,
+    capturePath: result.capturePath,
+    orientationSamples: result.orientationSamples,
+    grantedCamera: result.grantedCamera,
+    result,
+    poseError: null,
+  };
 }

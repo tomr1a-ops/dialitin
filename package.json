@@ -11,7 +11,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "postinstall": "node scripts/copy-mediapipe.mjs",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "test": "vitest run",
+    "check": "npm run test && npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
@@ -34,6 +35,7 @@
     "prettier": "^3.8.1",
     "serwist": "^9.5.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

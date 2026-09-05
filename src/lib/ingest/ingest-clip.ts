@@ -5,6 +5,7 @@ import type {
 } from "@/lib/capture/types";
 import { detectFrameRate } from "@/lib/ingest/detect-frame-rate";
 import {
+  createPoseWorkCanvas,
   drawVideoToPoseCanvas,
   grabCanvasBitmap,
 } from "@/lib/pose/frame-bitmap";
@@ -17,13 +18,10 @@ import {
   scalePoseToFullFrame,
 } from "@/lib/pose/isolate";
 import { createPoseRuntime, type PoseRuntime } from "@/lib/pose/pose-runtime";
+import type { PoseStatus } from "@/lib/pose/status";
 import type { CropBox, PoseFrame } from "@/lib/pose/types";
 
-export type IngestProgress = {
-  currentTime: number;
-  duration: number;
-  phase: "pose-init" | "streaming";
-};
+export type IngestProgress = PoseStatus;
 
 export type IngestClipOptions = {
   capturePath: CapturePath;
@@ -93,15 +91,12 @@ function attachAnalyser(
 }
 
 async function poseOnCanvas(
-  runtime: PoseRuntime | null,
-  canvas: OffscreenCanvas,
+  runtime: PoseRuntime,
+  canvas: ReturnType<typeof createPoseWorkCanvas>,
   crop: CropBox | null,
   timestampMs: number,
 ) {
-  if (!runtime) {
-    return [];
-  }
-  return runtime.detect(grabCanvasBitmap(canvas, crop), timestampMs);
+  return runtime.detect(await grabCanvasBitmap(canvas, crop), timestampMs);
 }
 
 export async function ingestClip(
@@ -117,6 +112,7 @@ export async function ingestClip(
   const audioRms: number[] = [];
   const keypoints: PoseFrame[] = [];
   const audio = createAnalyser(options.audioContext);
+  const ownsAudio = Boolean(audio && audio.context !== options.audioContext);
   if (audio) {
     void audio.context.resume().catch(() => undefined);
     attachAnalyser(audio, video);
@@ -131,10 +127,11 @@ export async function ingestClip(
   let poseRuntime: PoseRuntime | null = null;
   let poseBackend: IngestResult["poseBackend"] = "unavailable";
   let poseDelegate: IngestResult["poseDelegate"] = "unavailable";
+  let posePath: IngestResult["posePath"] = "unavailable";
   let poseWatchdogHit = false;
   let poseStartedAt = 0;
   let detectStamp = 1;
-  const poseCanvas = new OffscreenCanvas(2, 2);
+  const poseCanvas = createPoseWorkCanvas();
 
   const finish = () => {
     finished = true;
@@ -145,28 +142,31 @@ export async function ingestClip(
 
   try {
     options.onProgress?.({
-      currentTime: 0,
-      duration: 0,
-      phase: "pose-init",
+      phase: "loading-model",
+      loadedBytes: 0,
+      totalBytes: 1,
     });
-    try {
-      const started = await Promise.race([
-        createPoseRuntime(),
-        new Promise<never>((_, reject) => {
-          window.setTimeout(
-            () => reject(new Error("Pose runtime init timed out")),
-            20000,
-          );
-        }),
-      ]);
-      poseRuntime = started.runtime;
-      poseBackend = started.backend;
-      poseDelegate = started.delegate;
-    } catch {
-      poseRuntime = null;
-      poseBackend = "unavailable";
-      poseDelegate = "unavailable";
-    }
+    const started = await Promise.race([
+      createPoseRuntime({
+        onModelProgress(loadedBytes, totalBytes) {
+          options.onProgress?.({
+            phase: "loading-model",
+            loadedBytes,
+            totalBytes,
+          });
+        },
+      }),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("Pose runtime init timed out")),
+          45000,
+        );
+      }),
+    ]);
+    poseRuntime = started.runtime;
+    poseBackend = started.backend;
+    poseDelegate = started.delegate;
+    posePath = started.path;
 
     await new Promise<void>((resolve, reject) => {
       const onError = () => {
@@ -223,6 +223,10 @@ export async function ingestClip(
 
                 const work = drawVideoToPoseCanvas(video, poseCanvas);
 
+                if (!poseRuntime) {
+                  throw new Error("Pose failed to start: runtime missing");
+                }
+
                 if (!crop) {
                   const isolationPoses = await poseOnCanvas(
                     poseRuntime,
@@ -269,12 +273,31 @@ export async function ingestClip(
                   );
                 }
 
+                const duration = Number.isFinite(video.duration)
+                  ? video.duration
+                  : 0;
+                const totalFrames = Math.max(
+                  timestamps.length,
+                  duration > 0 ? Math.round(duration * 30) : timestamps.length,
+                );
                 options.onProgress?.({
-                  currentTime: video.currentTime,
-                  duration: video.duration,
-                  phase: "streaming",
+                  phase: "reading-body",
+                  frame: timestamps.length,
+                  totalFrames,
                 });
-              } catch {
+              } catch (error) {
+                const message =
+                  error instanceof Error ? error.message : String(error);
+                if (
+                  message.includes("OffscreenCanvas") ||
+                  message.includes("Pose failed to start") ||
+                  message.includes("WebGL context failure")
+                ) {
+                  window.clearTimeout(watchdog);
+                  finish();
+                  reject(error instanceof Error ? error : new Error(message));
+                  return;
+                }
                 // Keep streaming even if a single pose frame fails.
               } finally {
                 processing = false;
@@ -333,12 +356,13 @@ export async function ingestClip(
       }
     });
 
+    options.onProgress?.({ phase: "done" });
     const poseElapsedMs = performance.now() - poseStartedAt;
     const poseFpsProcessed =
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
     const firstCrop = keypoints[0]?.crop;
     console.info(
-      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
+      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${posePath}, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
         firstCrop
           ? ` crop=${Math.round(firstCrop.x)},${Math.round(firstCrop.y)},${Math.round(firstCrop.width)}x${Math.round(firstCrop.height)}`
           : ""
@@ -374,6 +398,7 @@ export async function ingestClip(
       poseElapsedMs,
       poseBackend,
       poseDelegate,
+      posePath,
       poseWatchdogHit,
       grantedCamera: options.grantedCamera,
     };
@@ -383,7 +408,7 @@ export async function ingestClip(
   } finally {
     finish();
     poseRuntime?.close();
-    if (audio) {
+    if (audio && ownsAudio) {
       void audio.context.close();
     }
     video.pause();
