@@ -12,6 +12,8 @@
     "format:check": "prettier --check .",
     "postinstall": "node scripts/copy-mediapipe.mjs",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "screenshots:reveal": "playwright test e2e/reveal-screenshots.spec.ts",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@serwist/turbopack": "^9.5.12",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",

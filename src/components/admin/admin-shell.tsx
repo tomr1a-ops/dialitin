@@ -69,6 +69,12 @@ export function AdminShell({
           >
             Scorer
           </Link>
+          <Link
+            href="/admin/demo"
+            className="shrink-0 rounded-full border border-[#c8f542]/30 px-3 py-1.5 text-xs text-[#c8f542]"
+          >
+            Reveal demo
+          </Link>
         </nav>
       </header>
       <div className="mx-auto max-w-6xl px-4 py-5">{children}</div>

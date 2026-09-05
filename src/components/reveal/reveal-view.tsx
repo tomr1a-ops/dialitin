@@ -1,19 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  buildRevealSessionFromCapture,
+  RevealFlow,
+} from "@/components/reveal/reveal-flow";
 import { getCaptureSession, updateCaptureSession } from "@/lib/capture/session";
 import type { IngestResult } from "@/lib/capture/types";
+import { estimateCameraAngle } from "@/lib/engine/angle";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
+import { createPlaceholderRevealInput } from "@/lib/reveal/placeholder";
 import { explainPoseFailure } from "@/lib/pose/errors";
-import { POSE_CONNECTIONS } from "@/lib/pose/connections";
-import { nearestPoseFrame } from "@/lib/pose/nearest-frame";
 import { formatPoseStatus, type PoseStatus } from "@/lib/pose/status";
-import type { PoseFrame } from "@/lib/pose/types";
 
-const SKELETON = "#c8f542";
-const FLASH_SECONDS = 1.5;
-const REST_OPACITY = 0.3;
 let poseInFlight: Promise<void> | null = null;
 
 function readSession() {
@@ -21,80 +21,6 @@ function readSession() {
     return null;
   }
   return getCaptureSession();
-}
-
-function contentRect(video: HTMLVideoElement) {
-  const elW = video.clientWidth;
-  const elH = video.clientHeight;
-  const vw = Math.max(video.videoWidth, 1);
-  const vh = Math.max(video.videoHeight, 1);
-  const scale = Math.min(elW / vw, elH / vh);
-  const width = vw * scale;
-  const height = vh * scale;
-  return {
-    x: (elW - width) / 2,
-    y: (elH - height) / 2,
-    width,
-    height,
-    videoWidth: vw,
-    videoHeight: vh,
-  };
-}
-
-function toCanvas(
-  frame: PoseFrame,
-  index: number,
-  rect: ReturnType<typeof contentRect>,
-) {
-  const point = frame.landmarks[index];
-  if (!point || point.visibility < 0.15) {
-    return null;
-  }
-  const fullX = frame.crop.x + point.x * frame.crop.width;
-  const fullY = frame.crop.y + point.y * frame.crop.height;
-  return {
-    x: rect.x + (fullX / rect.videoWidth) * rect.width,
-    y: rect.y + (fullY / rect.videoHeight) * rect.height,
-    visibility: point.visibility,
-  };
-}
-
-function drawSkeleton(
-  ctx: CanvasRenderingContext2D,
-  frame: PoseFrame,
-  rect: ReturnType<typeof contentRect>,
-  opacity: number,
-) {
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = SKELETON;
-  ctx.fillStyle = SKELETON;
-  ctx.globalAlpha = opacity;
-
-  for (const [start, end] of POSE_CONNECTIONS) {
-    const a = toCanvas(frame, start, rect);
-    const b = toCanvas(frame, end, rect);
-    if (!a || !b) {
-      continue;
-    }
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  }
-
-  for (let i = 0; i < frame.landmarks.length; i++) {
-    const point = toCanvas(frame, i, rect);
-    if (!point) {
-      continue;
-    }
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.globalAlpha = 1;
 }
 
 export function RevealView() {
@@ -106,12 +32,7 @@ export function RevealView() {
   const [status, setStatus] = useState<PoseStatus | null>(
     session?.result ? { phase: "done" } : null,
   );
-  const [playing, setPlaying] = useState(false);
-  const [slowMo, setSlowMo] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const loadAtRef = useRef<number | null>(null);
+
   const runPose = useCallback(() => {
     if (poseInFlight) {
       return poseInFlight;
@@ -153,67 +74,36 @@ export function RevealView() {
   }, []);
 
   useEffect(() => {
-    loadAtRef.current = performance.now();
-  }, [result]);
-
-  useEffect(() => {
     if (session && !session.result && !session.poseError) {
       void runPose();
     }
   }, [runPose, session]);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || !result) {
-      return;
+  const revealSession = useMemo(() => {
+    if (!session || !result) {
+      return null;
     }
-
-    let raf = 0;
-    const tick = () => {
-      const width = video.clientWidth;
-      const height = video.clientHeight;
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      const frame = nearestPoseFrame(result.keypoints, video.currentTime);
-      const ctx = canvas.getContext("2d");
-      if (ctx && frame) {
-        const started = loadAtRef.current ?? performance.now();
-        const elapsed = (performance.now() - started) / 1000;
-        const opacity = elapsed < FLASH_SECONDS ? 1 : REST_OPACITY;
-        drawSkeleton(ctx, frame, contentRect(video), opacity);
-      }
-      raf = window.requestAnimationFrame(tick);
-    };
-    raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
-  }, [result]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-    video.playbackRate = slowMo ? 0.25 : 1;
-  }, [slowMo]);
-
-  const trim = result?.phases.trim;
-  const swingFound = Boolean(result?.phases.impact.valid);
-  const windowStart = trim?.valid ? trim.value.startMs / 1000 : 0;
-  const windowEnd = trim?.valid
-    ? trim.value.endMs / 1000
-    : Math.max(result?.durationSeconds ?? 0.001, 0.001);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !trim?.valid) {
-      return;
-    }
-    video.currentTime = trim.value.startMs / 1000;
-    setCurrentTime(trim.value.startMs / 1000);
-  }, [trim]);
+    const angleReport = estimateCameraAngle({
+      frames: result.keypoints,
+      phases: result.phases,
+      imageWidth: result.resolution.width,
+      imageHeight: result.resolution.height,
+      capturePath: result.capturePath,
+      orientationSamples: result.orientationSamples,
+    });
+    const angle =
+      angleReport.angle.classification.value === "face_on" ? "face_on" : "dtl";
+    return buildRevealSessionFromCapture(
+      session.clipUrl,
+      result.keypoints,
+      result.phases,
+      {
+        handedness: "right",
+        angle,
+        input: createPlaceholderRevealInput(),
+      },
+    );
+  }, [result, session]);
 
   if (!session) {
     return (
@@ -231,34 +121,8 @@ export function RevealView() {
     );
   }
 
-  const duration = Math.max(windowEnd - windowStart, 0.001);
-  const clipDuration = Math.max(result?.durationSeconds ?? windowEnd, 0.001);
   const statusText = status ? formatPoseStatus(status) : "";
-
-  async function togglePlay() {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-    if (video.paused) {
-      if (trim?.valid && video.currentTime >= windowEnd - 0.02) {
-        video.currentTime = windowStart;
-      }
-      await video.play();
-      setPlaying(true);
-    } else {
-      video.pause();
-      setPlaying(false);
-    }
-  }
-
-  function seek(time: number) {
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-    video.currentTime = Math.min(Math.max(time, windowStart), windowEnd);
-  }
+  const swingFound = Boolean(result?.phases.impact.valid);
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[22rem] flex-col px-5 py-5">
@@ -268,49 +132,9 @@ export function RevealView() {
       >
         Start over
       </Link>
-      <h1
-        className="mt-4 text-[1.35rem] font-semibold tracking-tight"
-        data-swing-found={swingFound ? "1" : "0"}
-      >
-        {swingFound ? "Swing found" : "Finding your swing"}
-      </h1>
-      <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">
-        <video
-          ref={videoRef}
-          className="aspect-[9/16] w-full object-contain"
-          src={session.clipUrl}
-          playsInline
-          preload="auto"
-          onTimeUpdate={(event) => {
-            const time = event.currentTarget.currentTime;
-            if (trim?.valid && time >= windowEnd) {
-              event.currentTarget.pause();
-              event.currentTarget.currentTime = windowEnd;
-              setPlaying(false);
-              setCurrentTime(windowEnd);
-              return;
-            }
-            setCurrentTime(time);
-          }}
-          onEnded={() => setPlaying(false)}
-        />
-        <canvas
-          ref={canvasRef}
-          className="pointer-events-none absolute inset-0 h-full w-full"
-        />
-      </div>
-
-      {statusText ? (
-        <p
-          className="mt-3 text-sm leading-relaxed text-white/80"
-          data-pose-status={status?.phase}
-        >
-          {statusText}
-        </p>
-      ) : null}
 
       {poseError ? (
-        <div className="mt-3 space-y-3" data-pose-error="1">
+        <div className="mt-4 space-y-3" data-pose-error="1">
           <p className="text-sm font-semibold leading-relaxed text-[#f3c36a]">
             {poseError.userMessage}
           </p>
@@ -327,79 +151,110 @@ export function RevealView() {
         </div>
       ) : null}
 
-      <div className="mt-4 flex gap-2">
-        <button
-          type="button"
-          className="min-h-11 flex-1 rounded-full bg-[#c8f542] text-sm font-semibold text-[#0b1210]"
-          onClick={() => void togglePlay()}
-        >
-          {playing ? "Pause" : "Play"}
-        </button>
-        <button
-          type="button"
-          className={`min-h-11 flex-1 rounded-full border text-sm font-semibold ${
-            slowMo
-              ? "border-[#c8f542] bg-[#c8f542]/15 text-[#c8f542]"
-              : "border-white/20 text-white"
-          }`}
-          onClick={() => setSlowMo((value) => !value)}
-        >
-          0.25×
-        </button>
-      </div>
-
-      <label className="mt-4 text-sm text-white/60">
-        {currentTime.toFixed(2)}s / {clipDuration.toFixed(2)}s
-        <input
-          type="range"
-          min={windowStart}
-          max={windowEnd}
-          step={0.01}
-          value={Math.min(Math.max(currentTime, windowStart), windowEnd)}
-          onChange={(event) => seek(Number(event.target.value))}
-          className="mt-2 w-full"
-        />
-      </label>
-
-      <div className="relative mt-3 h-8 overflow-hidden rounded-md bg-white/8">
-        {(result?.frameTimestamps ?? []).map((time, index) => (
-          <button
-            key={`${time}-${index}`}
-            type="button"
-            aria-label={`${time.toFixed(3)} seconds`}
-            className="absolute top-1 h-6 w-px bg-white/45"
-            style={{
-              left: `${((time - windowStart) / duration) * 100}%`,
-            }}
-            onClick={() => seek(time)}
+      {!result || !revealSession ? (
+        <>
+          <RevealFlow
+            session={buildRevealSessionFromCapture(
+              session.clipUrl,
+              [],
+              {
+                address: {
+                  frameIndex: 0,
+                  timeMs: 0,
+                  confidence: 0,
+                  valid: false,
+                  reason: "pending",
+                },
+                takeaway: {
+                  frameIndex: 0,
+                  timeMs: 0,
+                  confidence: 0,
+                  valid: false,
+                  reason: "pending",
+                },
+                top: {
+                  frameIndex: 0,
+                  timeMs: 0,
+                  confidence: 0,
+                  valid: false,
+                  reason: "pending",
+                },
+                impact: {
+                  frameIndex: 0,
+                  timeMs: 0,
+                  confidence: 0,
+                  valid: false,
+                  reason: "pending",
+                },
+                finish: {
+                  frameIndex: 0,
+                  timeMs: 0,
+                  confidence: 0,
+                  valid: false,
+                  reason: "pending",
+                },
+                impactCandidate: {
+                  valid: false,
+                  value: "fused",
+                  confidence: 0,
+                  reason: "pending",
+                },
+                effectiveFrameRate: {
+                  valid: false,
+                  value: 30,
+                  confidence: 0,
+                  reason: "pending",
+                },
+                sloMoReexportedAt30: {
+                  valid: true,
+                  value: false,
+                  confidence: 1,
+                  reason: null,
+                },
+                trim: {
+                  valid: false,
+                  value: { startMs: 0, endMs: 0 },
+                  confidence: 0,
+                  reason: "pending",
+                },
+              },
+              { input: createPlaceholderRevealInput() },
+            )}
+            poseStatus={status}
           />
-        ))}
-      </div>
+          {statusText ? (
+            <p
+              className="mt-3 text-sm leading-relaxed text-white/80"
+              data-pose-status={status?.phase}
+            >
+              {statusText}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <div className="mt-4" data-swing-found={swingFound ? "1" : "0"}>
+          <RevealFlow
+            session={revealSession}
+            poseStatus={status}
+            initialScreen="swing_found"
+          />
+        </div>
+      )}
 
-      <footer
-        className="mt-5 space-y-1 text-[0.72rem] leading-relaxed text-white/50"
-        data-pose-fps={result ? result.poseFpsProcessed.toFixed(2) : ""}
-        data-resolution={
-          result ? `${result.resolution.width}x${result.resolution.height}` : ""
-        }
-        data-capture-path={session.capturePath}
-        data-pose-backend={result?.poseBackend ?? ""}
-        data-pose-delegate={result?.poseDelegate ?? ""}
-        data-pose-path={result?.posePath ?? ""}
-        data-pose-watchdog={result?.poseWatchdogHit ? "1" : "0"}
-      >
-        <p>
-          {session.capturePath}
-          {result
-            ? ` · ${result.resolution.width}×${result.resolution.height} · ${result.posePath} · ${result.poseFpsProcessed.toFixed(2)} fps-processed`
-            : " · waiting for pose"}
-        </p>
-        <p>
-          {result
-            ? `${result.frameCount} timestamps · ${result.keypoints.length} pose frames · ${result.poseBackend}/${result.poseDelegate}${result.poseWatchdogHit ? " · watchdog" : ""}`
-            : "Clip stays in memory — pose can retry without recording again."}
-        </p>
-      </footer>
+      {result ? (
+        <footer
+          className="mt-5 space-y-1 text-[0.72rem] leading-relaxed text-white/50"
+          data-pose-fps={result.poseFpsProcessed.toFixed(2)}
+          data-resolution={`${result.resolution.width}x${result.resolution.height}`}
+          data-capture-path={session.capturePath}
+          data-pose-path={result.posePath}
+        >
+          <p>
+            {session.capturePath} · {result.resolution.width}×
+            {result.resolution.height} · {result.posePath}
+          </p>
+        </footer>
+      ) : null}
     </main>
   );
 }
