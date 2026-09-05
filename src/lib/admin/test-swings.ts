@@ -1,5 +1,7 @@
 import { CLUB_FAMILIES, INTENTS } from "@/lib/admin/constants";
 import type { SwingPhases } from "@/lib/engine/phases";
+import type { StoredAngle } from "@/lib/engine/angle";
+import type { OrientationSample } from "@/lib/capture/types";
 import type { JointCoverage } from "@/lib/preview/coverage";
 import type { PoseFrame } from "@/lib/pose/types";
 
@@ -47,6 +49,9 @@ export type TestSwingKeypointsRow = {
   keypoints: PoseFrame[];
   coverage: JointCoverage[];
   phases: SwingPhases | null;
+  angle: StoredAngle | null;
+  normalized_keypoints: PoseFrame[] | null;
+  orientation: OrientationSample[] | null;
 };
 
 export type TestSwingListItem = TestSwingRow & {

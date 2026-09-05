@@ -37,8 +37,8 @@ export async function runInAppPipelineSelftest(): Promise<CaptureSession> {
   dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
 
   const wakeLock = await acquireWakeLock();
-  const orientationSamples: OrientationSample[] = [
-    { t: 0, beta: 12.5, gamma: -3.2 },
+  const   orientationSamples: OrientationSample[] = [
+    { t: 0, beta: 12.5, gamma: -3.2, roll: -3.2, pitch: -77.5 },
   ];
   const startedAt = performance.now();
   const stopOrientation = startOrientationCapture(startedAt, (sample) => {

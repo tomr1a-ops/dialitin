@@ -26,6 +26,10 @@ export const LEFT_WRIST = 15;
 export const RIGHT_WRIST = 16;
 export const LEFT_HIP = 23;
 export const RIGHT_HIP = 24;
+export const LEFT_ANKLE = 27;
+export const RIGHT_ANKLE = 28;
+export const LEFT_HEEL = 29;
+export const RIGHT_HEEL = 30;
 export const CROP_MARGIN = 0.38;
 /** Short side of the pose work canvas. Keep aspect; never upscale. */
 export const POSE_SHORT_SIDE = 640;

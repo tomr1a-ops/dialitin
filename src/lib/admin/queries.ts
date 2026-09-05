@@ -8,6 +8,8 @@ import {
 } from "@/lib/admin/test-swings";
 import type { VersionedRow } from "@/lib/admin/versioning";
 import { phasesFromUnknown } from "@/lib/engine/phases";
+import { angleFromUnknown } from "@/lib/engine/angle";
+import type { OrientationSample } from "@/lib/capture/types";
 import {
   framesFromStoredKeypoints,
   type JointCoverage,
@@ -88,6 +90,13 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
         keypoints: framesFromStoredKeypoints(raw.keypoints),
         coverage: (raw.coverage ?? []) as JointCoverage[],
         phases: phasesFromUnknown(raw.phases),
+        angle: angleFromUnknown(raw.angle),
+        normalized_keypoints: raw.normalized_keypoints
+          ? framesFromStoredKeypoints(raw.normalized_keypoints)
+          : null,
+        orientation: Array.isArray(raw.orientation)
+          ? (raw.orientation as OrientationSample[])
+          : null,
       });
     }
   }

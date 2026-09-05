@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { SkeletonOverlay } from "@/components/pose/skeleton-overlay";
 import type { TestSwingListItem } from "@/lib/admin/test-swings";
 import { diagnose } from "@/lib/engine/diagnose";
+import {
+  labeledAngleMismatch,
+} from "@/lib/engine/angle";
 import type { PhaseMark, SwingPhases } from "@/lib/engine/phases";
 
 const CONTENT_VERSION = "draft";
@@ -42,6 +45,8 @@ export function PreviewWorkspace({
   const keypoints = pose?.keypoints ?? [];
   const coverage = pose?.coverage ?? [];
   const phases = pose?.phases ?? null;
+  const angle = pose?.angle ?? null;
+  const angleMismatch = labeledAngleMismatch(selected?.angle, angle);
   const lastMediaTime = keypoints.at(-1)?.mediaTime;
   const duration = lastMediaTime && lastMediaTime > 0 ? lastMediaTime : 1;
 
@@ -158,6 +163,93 @@ export function PreviewWorkspace({
               <p className="mt-2 text-sm text-white/50">
                 No valid impact frame yet.
               </p>
+            )}
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold">Angle</h2>
+            {!angle ? (
+              <p className="mt-2 text-sm text-white/50">
+                Run pose on /admin/test-set to compute camera angle.
+              </p>
+            ) : (
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-white/10">
+                <table className="min-w-[640px] w-full text-left text-sm">
+                  <tbody>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Case</td>
+                      <td className="px-3 py-2 font-mono">{angle.case}</td>
+                    </tr>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Classification</td>
+                      <td className="px-3 py-2">
+                        {angle.classification.value}
+                        {angleMismatch ? (
+                          <span className="ml-2 rounded bg-red-500/20 px-2 py-0.5 text-xs text-red-300">
+                            mismatch — labeled {selected?.angle}
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-xs text-white/45">
+                            labeled {selected?.angle ?? "—"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Yaw</td>
+                      <td className="px-3 py-2">
+                        {angle.yaw.valid
+                          ? `${angle.yaw.value.toFixed(1)}°`
+                          : "—"}{" "}
+                        <span className="text-white/45">
+                          conf {angle.yaw.confidence.toFixed(2)}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Λ (lambda)</td>
+                      <td className="px-3 py-2">
+                        {angle.lambda.valid
+                          ? angle.lambda.value.toFixed(3)
+                          : "—"}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Roll / pitch</td>
+                      <td className="px-3 py-2">
+                        {angle.roll.valid
+                          ? `${angle.roll.value.toFixed(1)}°`
+                          : "—"}{" "}
+                        /{" "}
+                        {angle.pitch.valid
+                          ? `${angle.pitch.value.toFixed(1)}°`
+                          : "—"}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-white/10">
+                      <td className="px-3 py-2 text-white/60">Refuse</td>
+                      <td className="px-3 py-2">
+                        {!angle.valid ? (
+                          <span className="text-[#f3c36a]">
+                            refused ({angle.reason ?? "angle"})
+                          </span>
+                        ) : (
+                          <span className="text-[#c8f542]">accepted</span>
+                        )}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 text-white/60">Runtime</td>
+                      <td className="px-3 py-2">
+                        {angle.elapsedMs.toFixed(2)} ms
+                        <span className="ml-2 text-xs text-white/45">
+                          (doc target &lt;15 ms on-device)
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
 

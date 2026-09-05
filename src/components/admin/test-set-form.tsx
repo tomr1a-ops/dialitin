@@ -18,6 +18,8 @@ import {
   TextArea,
   TextInput,
 } from "@/components/admin/fields";
+import { estimateCameraAngle } from "@/lib/engine/angle";
+import { detectVerticalRollFromClip } from "@/lib/engine/angle-capture";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -130,7 +132,28 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         fileName: swing.storage_path,
         handedness: swing.handedness ?? "right",
         labeledFrameRate: swing.frame_rate,
+        orientationSamples: [],
       });
+      const verticalRoll =
+        result.phases.address.valid
+          ? await detectVerticalRollFromClip(
+              clip,
+              result.phases.address.timeMs,
+            )
+          : null;
+      const angleResult = estimateCameraAngle({
+        frames: result.keypoints,
+        phases: result.phases,
+        imageWidth: result.resolution.width,
+        imageHeight: result.resolution.height,
+        capturePath: swing.capture_path,
+        orientationSamples: result.orientationSamples,
+        verticalRoll,
+        handedness: swing.handedness ?? "right",
+      });
+      console.info(
+        `[dialitin] angle-estimate ${angleResult.angle.elapsedMs.toFixed(2)}ms case=${angleResult.angle.case} valid=${angleResult.angle.valid}`,
+      );
       const save = await fetch(`/api/admin/test-swings/${swing.id}/pose`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,6 +162,12 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
           frame_rate_detected: result.detectedFrameRate,
           frames: result.keypoints,
           phases: result.phases,
+          angle: angleResult.angle,
+          normalized_keypoints: angleResult.normalizedFrames,
+          orientation:
+            result.orientationSamples.length > 0
+              ? result.orientationSamples
+              : null,
         }),
       });
       const json = (await save.json()) as { error?: string };

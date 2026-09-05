@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, requireAdminApi } from "@/lib/admin/api";
+import { angleFromUnknown } from "@/lib/engine/angle";
 import { phasesFromUnknown, type SwingPhases } from "@/lib/engine/phases";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
 import {
@@ -16,6 +17,9 @@ type PoseBody = {
   frame_rate_detected?: number;
   model_version?: string;
   phases?: SwingPhases;
+  angle?: unknown;
+  normalized_keypoints?: PoseFrame[] | null;
+  orientation?: unknown;
 };
 
 export async function POST(
@@ -51,6 +55,9 @@ export async function POST(
       keypoints: frames,
       coverage: jointCoverage(frames),
       phases: phasesFromUnknown(body.phases),
+      angle: angleFromUnknown(body.angle),
+      normalized_keypoints: body.normalized_keypoints ?? null,
+      orientation: body.orientation ?? null,
     })
     .select("*")
     .single();

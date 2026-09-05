@@ -7,6 +7,10 @@ export type OrientationSample = {
   t: number;
   beta: number | null;
   gamma: number | null;
+  /** Roll (°) from DeviceOrientation gamma — stored at capture for §5.1 Case A */
+  roll: number | null;
+  /** Pitch (°) from beta−90 — stored at capture for §5.1 Case A */
+  pitch: number | null;
 };
 
 export type VideoResolution = {
