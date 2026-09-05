@@ -19,6 +19,10 @@ import type { PoseFrame } from "@/lib/pose/types";
 import { TracesOverlay } from "@/components/reveal/traces-overlay";
 
 const PLAYBACK_RATE = 0.25;
+const FIRST_HOLD_MS = 1500;
+const REPLAY_HOLD_MS = 500;
+
+type PlaybackPhase = "playing" | "holding" | "paused";
 
 export function AnnotatedPlayback({
   videoSrc,
@@ -41,11 +45,17 @@ export function AnnotatedPlayback({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [canvasFps, setCanvasFps] = useState(0);
-  const frozenRef = useRef(false);
+  const playbackPhaseRef = useRef<PlaybackPhase>("paused");
+  const guiltyTriggeredRef = useRef(false);
+  const hasCompletedFirstHoldRef = useRef(false);
+  const holdStartRef = useRef(0);
+  const holdDurationRef = useRef(FIRST_HOLD_MS);
   const fpsSamplesRef = useRef<number[]>([]);
+
+  const [playbackPhase, setPlaybackPhase] = useState<PlaybackPhase>("paused");
+  const [holdProgress, setHoldProgress] = useState(0);
+  const [scrubTime, setScrubTime] = useState(0);
+  const [canvasFps, setCanvasFps] = useState(0);
 
   const trim = phases.trim;
   const windowStart = trim?.valid ? trim.value.startMs / 1000 : 0;
@@ -71,6 +81,11 @@ export function AnnotatedPlayback({
           capturePath,
         })
       : null;
+
+  const setPhase = useCallback((phase: PlaybackPhase) => {
+    playbackPhaseRef.current = phase;
+    setPlaybackPhase(phase);
+  }, []);
 
   const drawFrame = useCallback(() => {
     const video = videoRef.current;
@@ -121,6 +136,17 @@ export function AnnotatedPlayback({
     });
   }, [angle, handedness, keypoints, phases, tushLineX, wristReconstruction]);
 
+  const resumeFromHold = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || playbackPhaseRef.current !== "holding") {
+      return;
+    }
+    hasCompletedFirstHoldRef.current = true;
+    setHoldProgress(0);
+    setPhase("playing");
+    await video.play();
+  }, [setPhase]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) {
@@ -128,8 +154,11 @@ export function AnnotatedPlayback({
     }
     video.playbackRate = PLAYBACK_RATE;
     video.currentTime = windowStart;
-    setCurrentTime(windowStart);
-  }, [windowStart, videoSrc]);
+    setScrubTime(windowStart);
+    guiltyTriggeredRef.current = false;
+    setPhase("paused");
+    setHoldProgress(0);
+  }, [setPhase, windowStart, videoSrc]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -157,38 +186,63 @@ export function AnnotatedPlayback({
       }
       drawFrame();
 
+      const phase = playbackPhaseRef.current;
+
       if (
-        !frozenRef.current &&
+        phase === "playing" &&
+        !guiltyTriggeredRef.current &&
         video.currentTime >= guiltyTimeSec
       ) {
-        frozenRef.current = true;
+        guiltyTriggeredRef.current = true;
         video.pause();
-        setPlaying(false);
+        video.currentTime = guiltyTimeSec;
+        setScrubTime(guiltyTimeSec);
+        holdDurationRef.current = hasCompletedFirstHoldRef.current
+          ? REPLAY_HOLD_MS
+          : FIRST_HOLD_MS;
+        holdStartRef.current = now;
+        setHoldProgress(0);
+        setPhase("holding");
         onFreeze?.();
       }
+
+      if (phase === "holding") {
+        const elapsed = now - holdStartRef.current;
+        const progress = Math.min(elapsed / holdDurationRef.current, 1);
+        setHoldProgress(progress);
+        if (progress >= 1) {
+          void resumeFromHold();
+        }
+      }
+
       raf = window.requestAnimationFrame(tick);
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [drawFrame, guiltyTimeSec, onFreeze]);
+  }, [drawFrame, guiltyTimeSec, onFreeze, resumeFromHold, setPhase]);
 
   async function togglePlay() {
     const video = videoRef.current;
     if (!video) {
       return;
     }
+    if (playbackPhaseRef.current === "holding") {
+      hasCompletedFirstHoldRef.current = true;
+      setHoldProgress(0);
+      setPhase("paused");
+      return;
+    }
     if (video.paused) {
-      if (frozenRef.current) {
-        frozenRef.current = false;
-      }
       if (video.currentTime >= windowEnd - 0.02) {
         video.currentTime = windowStart;
+        setScrubTime(windowStart);
+        guiltyTriggeredRef.current = false;
       }
+      setPhase("playing");
       await video.play();
-      setPlaying(true);
     } else {
       video.pause();
-      setPlaying(false);
+      setPhase("paused");
     }
   }
 
@@ -197,10 +251,26 @@ export function AnnotatedPlayback({
     if (!video) {
       return;
     }
-    frozenRef.current = false;
-    video.currentTime = Math.min(Math.max(time, windowStart), windowEnd);
-    setCurrentTime(video.currentTime);
+    const clamped = Math.min(Math.max(time, windowStart), windowEnd);
+    guiltyTriggeredRef.current = clamped >= guiltyTimeSec;
+    setHoldProgress(0);
+    setPhase("paused");
+    video.currentTime = clamped;
+    setScrubTime(clamped);
   }
+
+  function handleFrameTap() {
+    if (playbackPhaseRef.current === "holding") {
+      void resumeFromHold();
+    }
+  }
+
+  const buttonLabel =
+    playbackPhase === "holding"
+      ? "Holding…"
+      : playbackPhase === "playing"
+        ? "Pause"
+        : "Play ¼×";
 
   return (
     <section data-testid="reveal-annotated-playback" data-canvas-fps={canvasFps.toFixed(1)}>
@@ -219,32 +289,79 @@ export function AnnotatedPlayback({
           preload="auto"
           onTimeUpdate={(event) => {
             const time = event.currentTarget.currentTime;
+            if (playbackPhaseRef.current !== "holding") {
+              setScrubTime(time);
+            }
             if (time >= windowEnd) {
               event.currentTarget.pause();
-              setPlaying(false);
+              setPhase("paused");
             }
-            setCurrentTime(time);
           }}
         />
         <canvas
           ref={canvasRef}
           className="pointer-events-none absolute inset-0 h-full w-full"
         />
+        {playbackPhase === "holding" ? (
+          <button
+            type="button"
+            className="absolute inset-0 flex cursor-pointer items-center justify-center bg-transparent"
+            aria-label="Resume from guilty frame hold"
+            data-testid="guilty-frame-hold-overlay"
+            onClick={handleFrameTap}
+          >
+            <svg
+              className="h-16 w-16"
+              viewBox="0 0 64 64"
+              aria-hidden="true"
+              data-testid="guilty-frame-hold-ring"
+            >
+              <circle
+                cx="32"
+                cy="32"
+                r="28"
+                fill="none"
+                stroke="rgba(255,255,255,0.2)"
+                strokeWidth="3"
+              />
+              <circle
+                cx="32"
+                cy="32"
+                r="28"
+                fill="none"
+                stroke="#c8f542"
+                strokeWidth="3"
+                strokeLinecap="round"
+                transform="rotate(-90 32 32)"
+                strokeDasharray={`${2 * Math.PI * 28}`}
+                strokeDashoffset={`${2 * Math.PI * 28 * (1 - holdProgress)}`}
+              />
+            </svg>
+            <span
+              className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#ff6b6b]"
+              data-testid="guilty-frame-hold-label"
+            >
+              first guilty frame
+            </span>
+          </button>
+        ) : null}
       </div>
       <div className="mt-4 flex gap-2">
         <button
           type="button"
-          className="min-h-11 flex-1 rounded-full bg-[#c8f542] text-sm font-semibold text-[#0b1210]"
+          className="min-h-11 flex-1 rounded-full bg-[#c8f542] text-sm font-semibold text-[#0b1210] disabled:opacity-70"
+          disabled={playbackPhase === "holding"}
+          data-testid="reveal-playback-toggle"
           onClick={() => void togglePlay()}
         >
-          {playing ? "Pause" : "Play ¼×"}
+          {buttonLabel}
         </button>
       </div>
       <RevealScrubber
         className="mt-4"
         windowStart={windowStart}
         windowEnd={windowEnd}
-        currentTime={currentTime}
+        currentTime={scrubTime}
         phases={phases}
         guiltyTimeSec={guiltyTimeSec}
         onSeek={seek}
