@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { estimateCameraAngle, angleFromUnknown } from "@/lib/engine/angle";
 import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
 import {
+  AV_CLOCK_OFFSET_MS,
+  AV_CLOCK_OFFSET_REASON,
   findSwingPhases,
   phasesFromUnknown,
   type ImpactDiagnostics,
@@ -63,6 +69,62 @@ async function patchKeypoints(id: string, body: Record<string, unknown>) {
   }
 }
 
+async function signedClipUrl(storagePath: string) {
+  const res = await fetch(
+    `${base}/storage/v1/object/sign/test-swings/${storagePath}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: key!,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 3600 }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`sign clip: ${res.status}`);
+  }
+  const json = (await res.json()) as { signedURL: string };
+  return `${base}/storage/v1${json.signedURL}`;
+}
+
+function audioSamplesFromClip(
+  clipBytes: Buffer,
+  timesMs: number[],
+): Array<{ timeMs: number; rms: number }> {
+  const dir = mkdtempSync(join(tmpdir(), "g01-audio-"));
+  const clipPath = join(dir, "clip.mov");
+  const wavPath = join(dir, "audio.raw");
+  writeFileSync(clipPath, clipBytes);
+  execFileSync(
+    "ffmpeg",
+    ["-y", "-i", clipPath, "-ac", "1", "-ar", "44100", "-f", "f32le", wavPath],
+    { stdio: "ignore" },
+  );
+  const raw = readFileSync(wavPath);
+  const sampleRate = 44100;
+  const samples = new Float32Array(
+    raw.buffer,
+    raw.byteOffset,
+    raw.byteLength / 4,
+  );
+  const windowMs = 33;
+  return timesMs.map((timeMs) => {
+    const center = Math.round((timeMs / 1000) * sampleRate);
+    const half = Math.round((windowMs / 1000) * sampleRate);
+    const from = Math.max(0, center - half);
+    const to = Math.min(samples.length, center + half);
+    let sum = 0;
+    for (let i = from; i < to; i++) {
+      const s = samples[i]!;
+      sum += s * s;
+    }
+    const n = Math.max(1, to - from);
+    return { timeMs, rms: Math.sqrt(sum / n) };
+  });
+}
+
 describe.skipIf(!hasSupabase)("G01 phase recompute", () => {
   test(
     "recomputes phases and metrics for G01 face-on clip",
@@ -97,7 +159,25 @@ describe.skipIf(!hasSupabase)("G01 phase recompute", () => {
             ? "native_slomo"
             : "upload";
 
+      let audioSamples: Array<{ timeMs: number; rms: number }> | undefined;
+      if (swing.storage_path) {
+        try {
+          const clipUrl = await signedClipUrl(swing.storage_path);
+          const clipRes = await fetch(clipUrl);
+          if (clipRes.ok) {
+            const clipBytes = Buffer.from(await clipRes.arrayBuffer());
+            audioSamples = audioSamplesFromClip(
+              clipBytes,
+              frames.map((frame) => frame.mediaTime * 1000),
+            );
+          }
+        } catch {
+          audioSamples = undefined;
+        }
+      }
+
       const phases = findSwingPhases(frames, {
+        audioSamples,
         handedness: swing.handedness === "left" ? "left" : "right",
         capturePath,
         labeledFrameRate: swing.frame_rate,
@@ -150,36 +230,23 @@ describe.skipIf(!hasSupabase)("G01 phase recompute", () => {
               top: beforePhases.top.frameIndex,
               impact: beforePhases.impact.frameIndex,
               finish: beforePhases.finish.frameIndex,
-              tempo_ratio: (
-                row!.metrics as { tempo_ratio?: { value: number } } | null
-              )?.tempo_ratio?.value,
-              shoulder_rotation_top: (
-                row!.metrics as {
-                  shoulder_rotation_top?: { value: number };
-                } | null
-              )?.shoulder_rotation_top?.value,
-              hip_rotation_top: (
-                row!.metrics as { hip_rotation_top?: { value: number } } | null
-              )?.hip_rotation_top?.value,
-              sequence_proxy: (
-                row!.metrics as { sequence_proxy?: { value: number } } | null
-              )?.sequence_proxy?.value,
             }
           : null,
-        after: {
+        phase_frames: {
           address: phases.address.frameIndex,
           takeaway: phases.takeaway.frameIndex,
           top: phases.top.frameIndex,
           impact: phases.impact.frameIndex,
           finish: phases.finish.frameIndex,
-          top_before_impact: phases.impact.frameIndex - phases.top.frameIndex,
-          tempo_ratio: metrics.tempo_ratio.value,
-          shoulder_rotation_top: metrics.shoulder_rotation_top.value,
-          hip_rotation_top: metrics.hip_rotation_top.value,
-          sequence_proxy: metrics.sequence_proxy.value,
         },
-        impact_diagnostics: diagnostics,
+        audio_transient_frame: diagnostics.audioTransientFrameIndex,
+        motion_strike_frame: diagnostics.motionImpactFrameIndex,
+        motion_peak_frame: diagnostics.motionPeakFrameIndex,
+        measured_av_offset_ms: diagnostics.measuredAvOffsetMs,
+        av_clock_offset_ms: AV_CLOCK_OFFSET_MS[capturePath],
+        av_clock_offset_reason: AV_CLOCK_OFFSET_REASON[capturePath],
         impact_candidate: phases.impactCandidate.value,
+        slo_mo_reexport: phases.sloMoReexportedAt30.value,
       };
 
       console.info(

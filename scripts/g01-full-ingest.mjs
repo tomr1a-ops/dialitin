@@ -117,16 +117,19 @@ async function main() {
   const puppeteer = await import("puppeteer");
   const browser = await puppeteer.default.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    protocolTimeout: 600_000,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(600_000);
     await page.goto(`${siteBase}/debug/ingest-runner`, {
-      waitUntil: "networkidle0",
-      timeout: 180_000,
+      waitUntil: "domcontentloaded",
+      timeout: 120_000,
     });
     await page.waitForFunction(() => window.__ingestReady === true, {
-      timeout: 60_000,
+      timeout: 120_000,
     });
 
     const result = await page.evaluate(
