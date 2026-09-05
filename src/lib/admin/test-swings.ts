@@ -1,9 +1,11 @@
 import { CLUB_FAMILIES, INTENTS } from "@/lib/admin/constants";
+import type { JointCoverage } from "@/lib/preview/coverage";
+import type { PoseFrame } from "@/lib/pose/types";
 
 export const TEST_SWING_BUCKET = "test-swings";
 
 export const TEST_SWING_ANGLES = ["dtl", "face_on"] as const;
-export const TEST_CAPTURE_PATHS = ["in_app", "upload"] as const;
+export const TEST_CAPTURE_PATHS = ["in_app", "native_slomo"] as const;
 export const HANDEDNESS = ["right", "left"] as const;
 export const CAMERA_YAW_MARKERS = [0, 5, -5, 10, -10, 15, -15] as const;
 
@@ -15,42 +17,39 @@ export type ClubFamily = (typeof CLUB_FAMILIES)[number];
 export type ShotIntent = (typeof INTENTS)[number];
 
 export type TestSwingLabels = {
-  golfer_label: string;
-  club_family: ClubFamily;
-  intent: ShotIntent;
-  angle: TestSwingAngle;
-  frame_rate: number;
-  camera_yaw_marker: CameraYawMarker;
-  capture_path: TestCapturePath;
+  golfer_label: string | null;
+  club_family: ClubFamily | null;
+  intent: ShotIntent | null;
+  angle: TestSwingAngle | null;
+  frame_rate: number | null;
+  camera_yaw_marker: CameraYawMarker | null;
+  capture_path: TestCapturePath | null;
   consecutive_group: string | null;
   pro_label_fault_1: string | null;
   pro_label_fault_2: string | null;
-  handedness: Handedness;
+  handedness: Handedness | null;
   notes: string | null;
 };
 
 export type TestSwingRow = TestSwingLabels & {
   id: string;
   created_at: string;
-  updated_at: string;
-  created_by: string | null;
-  created_by_email: string | null;
   storage_path: string;
 };
 
-export type TestSwingPoseRun = {
+export type TestSwingKeypointsRow = {
   id: string;
   created_at: string;
   test_swing_id: string;
-  frames_processed: number;
-  coverage_pct: number;
-  pose_path: "worker" | "main";
-  seconds_to_process: number;
+  model_version: string;
+  frame_rate_detected: number;
+  keypoints: PoseFrame[];
+  coverage: JointCoverage[];
 };
 
 export type TestSwingListItem = TestSwingRow & {
   signed_url: string | null;
-  pose_run: TestSwingPoseRun | null;
+  keypoints: TestSwingKeypointsRow | null;
 };
 
 function isClubFamily(value: string): value is ClubFamily {
@@ -88,63 +87,66 @@ function blankToNull(value: unknown): string | null {
 export function parseTestSwingLabels(
   input: Record<string, unknown>,
 ): { ok: true; labels: TestSwingLabels } | { ok: false; error: string } {
-  const golfer_label = String(input.golfer_label ?? "").trim();
-  if (!golfer_label) {
-    return { ok: false, error: "golfer_label is required." };
-  }
-
-  const club_family = String(input.club_family ?? "");
-  if (!isClubFamily(club_family)) {
+  const clubRaw = blankToNull(input.club_family);
+  if (clubRaw && !isClubFamily(clubRaw)) {
     return { ok: false, error: "club_family is invalid." };
   }
 
-  const intent = String(input.intent ?? "");
-  if (!isIntent(intent)) {
+  const intentRaw = blankToNull(input.intent);
+  if (intentRaw && !isIntent(intentRaw)) {
     return { ok: false, error: "intent is invalid." };
   }
 
-  const angle = String(input.angle ?? "");
-  if (!isAngle(angle)) {
+  const angleRaw = blankToNull(input.angle);
+  if (angleRaw && !isAngle(angleRaw)) {
     return { ok: false, error: "angle must be dtl or face_on." };
   }
 
-  const frame_rate = Number(input.frame_rate);
-  if (!Number.isFinite(frame_rate) || frame_rate <= 0 || frame_rate > 480) {
-    return { ok: false, error: "frame_rate must be between 0 and 480." };
+  const frameRaw = input.frame_rate;
+  const frameBlank =
+    frameRaw === "" || frameRaw === null || frameRaw === undefined;
+  const frame_rate = frameBlank ? null : Number(frameRaw);
+  if (
+    frame_rate !== null &&
+    (!Number.isInteger(frame_rate) || frame_rate <= 0)
+  ) {
+    return { ok: false, error: "frame_rate must be a positive integer." };
   }
 
-  const camera_yaw_marker = Number(input.camera_yaw_marker);
-  if (!isYaw(camera_yaw_marker)) {
+  const yawRaw = input.camera_yaw_marker;
+  const yawBlank = yawRaw === "" || yawRaw === null || yawRaw === undefined;
+  const yawNumber = yawBlank ? null : Number(yawRaw);
+  if (yawNumber !== null && !isYaw(yawNumber)) {
     return {
       ok: false,
       error: "camera_yaw_marker must be 0, ±5, ±10, or ±15.",
     };
   }
 
-  const capture_path = String(input.capture_path ?? "");
-  if (!isCapturePath(capture_path)) {
-    return { ok: false, error: "capture_path must be in_app or upload." };
+  const pathRaw = blankToNull(input.capture_path);
+  if (pathRaw && !isCapturePath(pathRaw)) {
+    return { ok: false, error: "capture_path must be in_app or native_slomo." };
   }
 
-  const handedness = String(input.handedness ?? "");
-  if (!isHandedness(handedness)) {
+  const handRaw = blankToNull(input.handedness);
+  if (handRaw && !isHandedness(handRaw)) {
     return { ok: false, error: "handedness must be right or left." };
   }
 
   return {
     ok: true,
     labels: {
-      golfer_label,
-      club_family,
-      intent,
-      angle,
+      golfer_label: blankToNull(input.golfer_label),
+      club_family: clubRaw && isClubFamily(clubRaw) ? clubRaw : null,
+      intent: intentRaw && isIntent(intentRaw) ? intentRaw : null,
+      angle: angleRaw && isAngle(angleRaw) ? angleRaw : null,
       frame_rate,
-      camera_yaw_marker,
-      capture_path,
+      camera_yaw_marker: yawNumber,
+      capture_path: pathRaw && isCapturePath(pathRaw) ? pathRaw : null,
       consecutive_group: blankToNull(input.consecutive_group),
       pro_label_fault_1: blankToNull(input.pro_label_fault_1),
       pro_label_fault_2: blankToNull(input.pro_label_fault_2),
-      handedness,
+      handedness: handRaw && isHandedness(handRaw) ? handRaw : null,
       notes: blankToNull(input.notes),
     },
   };

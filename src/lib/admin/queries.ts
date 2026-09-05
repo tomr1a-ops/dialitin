@@ -2,12 +2,15 @@ import { createSecretSupabaseClient } from "@/lib/supabase/admin";
 import type { ContentKind } from "@/lib/admin/constants";
 import {
   TEST_SWING_BUCKET,
+  type TestSwingKeypointsRow,
   type TestSwingListItem,
-  type TestSwingPoseRun,
   type TestSwingRow,
 } from "@/lib/admin/test-swings";
 import type { VersionedRow } from "@/lib/admin/versioning";
-import type { PoseFrame } from "@/lib/pose/types";
+import {
+  framesFromStoredKeypoints,
+  type JointCoverage,
+} from "@/lib/preview/coverage";
 
 export async function listKindRows(kind: ContentKind): Promise<VersionedRow[]> {
   const secret = createSecretSupabaseClient();
@@ -61,17 +64,29 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
 
   const rows = (swings ?? []) as TestSwingRow[];
   const ids = rows.map((row) => row.id);
-  const runsBySwing = new Map<string, TestSwingPoseRun>();
+  const latest = new Map<string, TestSwingKeypointsRow>();
   if (ids.length > 0) {
-    const { data: runs, error: runError } = await secret
-      .from("test_swing_pose_runs")
+    const { data: poseRows, error: poseError } = await secret
+      .from("test_swing_keypoints")
       .select("*")
-      .in("test_swing_id", ids);
-    if (runError) {
-      throw new Error(runError.message);
+      .in("test_swing_id", ids)
+      .order("created_at", { ascending: false });
+    if (poseError) {
+      throw new Error(poseError.message);
     }
-    for (const run of (runs ?? []) as TestSwingPoseRun[]) {
-      runsBySwing.set(run.test_swing_id, run);
+    for (const raw of poseRows ?? []) {
+      if (latest.has(raw.test_swing_id)) {
+        continue;
+      }
+      latest.set(raw.test_swing_id, {
+        id: raw.id,
+        created_at: raw.created_at,
+        test_swing_id: raw.test_swing_id,
+        model_version: raw.model_version,
+        frame_rate_detected: Number(raw.frame_rate_detected),
+        keypoints: framesFromStoredKeypoints(raw.keypoints),
+        coverage: (raw.coverage ?? []) as JointCoverage[],
+      });
     }
   }
 
@@ -83,36 +98,8 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
     items.push({
       ...row,
       signed_url: signed?.signedUrl ?? null,
-      pose_run: runsBySwing.get(row.id) ?? null,
+      keypoints: latest.get(row.id) ?? null,
     });
   }
   return items;
-}
-
-export async function listKeypointsBySwing(
-  swingIds: string[],
-): Promise<Record<string, PoseFrame[]>> {
-  const grouped: Record<string, PoseFrame[]> = {};
-  if (swingIds.length === 0) {
-    return grouped;
-  }
-  const secret = createSecretSupabaseClient();
-  const { data, error } = await secret
-    .from("test_swing_keypoints")
-    .select("test_swing_id, frame_index, media_time, landmarks, crop_box")
-    .in("test_swing_id", swingIds)
-    .order("frame_index", { ascending: true });
-  if (error) {
-    throw new Error(error.message);
-  }
-  for (const row of data ?? []) {
-    const frames = grouped[row.test_swing_id] ?? [];
-    frames.push({
-      mediaTime: Number(row.media_time),
-      landmarks: row.landmarks as PoseFrame["landmarks"],
-      crop: row.crop_box as PoseFrame["crop"],
-    });
-    grouped[row.test_swing_id] = frames;
-  }
-  return grouped;
 }

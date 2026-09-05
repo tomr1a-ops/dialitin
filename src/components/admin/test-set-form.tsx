@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CLUB_FAMILIES, INTENTS } from "@/lib/admin/constants";
 import {
@@ -18,6 +18,8 @@ import {
   TextArea,
   TextInput,
 } from "@/components/admin/fields";
+import { ingestClip } from "@/lib/ingest/ingest-clip";
+import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const emptyLabels = (): TestSwingLabels => ({
@@ -27,7 +29,7 @@ const emptyLabels = (): TestSwingLabels => ({
   angle: "dtl",
   frame_rate: 30,
   camera_yaw_marker: 0,
-  capture_path: "upload",
+  capture_path: "native_slomo",
   consecutive_group: null,
   pro_label_fault_1: null,
   pro_label_fault_2: null,
@@ -35,121 +37,115 @@ const emptyLabels = (): TestSwingLabels => ({
   notes: null,
 });
 
-type ClipDraft = {
-  file: File;
-  labels: TestSwingLabels;
-};
-
 export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
   const router = useRouter();
-  const [drafts, setDrafts] = useState<ClipDraft[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [labels, setLabels] = useState<TestSwingLabels>(emptyLabels);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
 
-  const defaultLabels = useMemo(() => emptyLabels(), []);
-
-  function onFiles(fileList: FileList | null) {
-    if (!fileList) {
-      return;
-    }
-    const next = Array.from(fileList).map((file, index) => ({
-      file,
-      labels: {
-        ...defaultLabels,
-        golfer_label: `G${String(index + 1).padStart(2, "0")}`,
-      },
-    }));
-    setDrafts(next);
-    setError("");
-    setStatus("");
-  }
-
-  function updateDraft(index: number, patch: Partial<TestSwingLabels>) {
-    setDrafts((current) =>
-      current.map((draft, i) =>
-        i === index
-          ? { ...draft, labels: { ...draft.labels, ...patch } }
-          : draft,
-      ),
-    );
-  }
-
-  function copyFirstToAll() {
-    const first = drafts[0];
-    if (!first) {
-      return;
-    }
-    setDrafts((current) =>
-      current.map((draft, index) => ({
-        ...draft,
-        labels: {
-          ...first.labels,
-          golfer_label: `G${String(index + 1).padStart(2, "0")}`,
-        },
-      })),
-    );
+  function patch(next: Partial<TestSwingLabels>) {
+    setLabels((current) => ({ ...current, ...next }));
   }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (drafts.length === 0) {
-      setError("Choose one or more clips first.");
+    if (!file) {
+      setError("Choose a clip first.");
       return;
     }
     setBusy(true);
     setError("");
     const supabase = createBrowserSupabaseClient();
     try {
-      for (let i = 0; i < drafts.length; i++) {
-        const draft = drafts[i]!;
-        setStatus(`Uploading ${i + 1} of ${drafts.length}: ${draft.file.name}`);
-        const signRes = await fetch("/api/admin/test-swings/upload-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: draft.file.name,
-            contentType: draft.file.type || "video/mp4",
-          }),
-        });
-        const signJson = (await signRes.json()) as {
-          path?: string;
-          token?: string;
-          error?: string;
-        };
-        if (!signRes.ok || !signJson.path || !signJson.token) {
-          throw new Error(signJson.error ?? "Could not sign upload.");
-        }
-        const uploaded = await supabase.storage
-          .from(TEST_SWING_BUCKET)
-          .uploadToSignedUrl(signJson.path, signJson.token, draft.file, {
-            contentType: draft.file.type || "video/mp4",
-          });
-        if (uploaded.error) {
-          throw new Error(uploaded.error.message);
-        }
-        const saveRes = await fetch("/api/admin/test-swings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            storage_path: signJson.path,
-            ...draft.labels,
-          }),
-        });
-        const saveJson = (await saveRes.json()) as { error?: string };
-        if (!saveRes.ok) {
-          throw new Error(saveJson.error ?? "Could not save labels.");
-        }
+      setStatus(`Uploading ${file.name}`);
+      const signRes = await fetch("/api/admin/test-swings/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type || "video/mp4",
+        }),
+      });
+      const signJson = (await signRes.json()) as {
+        path?: string;
+        token?: string;
+        error?: string;
+      };
+      if (!signRes.ok || !signJson.path || !signJson.token) {
+        throw new Error(signJson.error ?? "Could not sign upload.");
       }
-      setDrafts([]);
-      setStatus(
-        `Uploaded ${drafts.length} clip${drafts.length === 1 ? "" : "s"}.`,
-      );
+      const uploaded = await supabase.storage
+        .from(TEST_SWING_BUCKET)
+        .uploadToSignedUrl(signJson.path, signJson.token, file, {
+          contentType: file.type || "video/mp4",
+        });
+      if (uploaded.error) {
+        throw new Error(uploaded.error.message);
+      }
+      const saveRes = await fetch("/api/admin/test-swings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storage_path: signJson.path,
+          ...labels,
+        }),
+      });
+      const saveJson = (await saveRes.json()) as { error?: string };
+      if (!saveRes.ok) {
+        throw new Error(saveJson.error ?? "Could not save labels.");
+      }
+      setFile(null);
+      setStatus("Uploaded.");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runPose(swing: TestSwingListItem) {
+    if (!swing.signed_url) {
+      setError(`No signed URL for ${swing.golfer_label ?? swing.id}.`);
+      return;
+    }
+    setRunningId(swing.id);
+    setError("");
+    setStatus(`Running Phase 0 pose on ${swing.golfer_label ?? "clip"}…`);
+    try {
+      const response = await fetch(swing.signed_url);
+      if (!response.ok) {
+        throw new Error("Could not download clip.");
+      }
+      const clip = new Blob([await response.arrayBuffer()], {
+        type: "video/mp4",
+      });
+      const result = await ingestClip(clip, {
+        capturePath: "upload",
+        fileName: swing.storage_path,
+      });
+      const save = await fetch(`/api/admin/test-swings/${swing.id}/pose`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model_version: POSE_MODEL_VERSION,
+          frame_rate_detected: result.detectedFrameRate,
+          frames: result.keypoints,
+        }),
+      });
+      const json = (await save.json()) as { error?: string };
+      if (!save.ok) {
+        throw new Error(json.error ?? "Could not save keypoints.");
+      }
+      setStatus("Pose saved.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Pose failed.");
+    } finally {
+      setRunningId(null);
     }
   }
 
@@ -159,209 +155,190 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         onSubmit={onSubmit}
         className="rounded-2xl border border-white/10 bg-[#101916] p-4"
       >
-        <h2 className="text-lg font-semibold">Upload filming-day clips</h2>
+        <h2 className="text-lg font-semibold">Upload a filming-day clip</h2>
         <p className="mt-1 text-sm text-white/55">
           Private bucket <code className="text-[#c8f542]">test-swings</code>.
-          Signed URLs only. Set labels per clip before upload.
+          Capture path is in-app or native Slo-mo (Rev 27 §5.3).
         </p>
         <div className="mt-4">
           <input
             type="file"
             accept="video/*"
-            multiple
             disabled={busy}
-            onChange={(event) => onFiles(event.target.files)}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             className="block w-full text-sm text-white/80 file:mr-3 file:rounded-lg file:border-0 file:bg-[#c8f542] file:px-3 file:py-2 file:font-semibold file:text-[#0b1210]"
           />
         </div>
-        {drafts.length > 1 ? (
-          <button
-            type="button"
-            onClick={copyFirstToAll}
-            className="mt-3 text-xs text-[#c8f542] underline"
-          >
-            Copy first-row labels to all (keeps G01, G02…)
-          </button>
-        ) : null}
-        <div className="mt-4 flex flex-col gap-4">
-          {drafts.map((draft, index) => (
-            <fieldset
-              key={`${draft.file.name}-${index}`}
-              className="grid gap-3 rounded-xl border border-white/10 p-3 sm:grid-cols-2 lg:grid-cols-3"
+        <fieldset className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Golfer label">
+            <TextInput
+              value={labels.golfer_label ?? ""}
+              onChange={(event) => patch({ golfer_label: event.target.value })}
+            />
+          </Field>
+          <Field label="Club family">
+            <SelectInput
+              value={labels.club_family ?? ""}
+              onChange={(event) =>
+                patch({
+                  club_family: (event.target.value ||
+                    null) as TestSwingLabels["club_family"],
+                })
+              }
             >
-              <legend className="px-1 text-xs text-white/50">
-                {draft.file.name}
-              </legend>
-              <Field label="Golfer label">
-                <TextInput
-                  value={draft.labels.golfer_label}
-                  onChange={(event) =>
-                    updateDraft(index, { golfer_label: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Club family">
-                <SelectInput
-                  value={draft.labels.club_family}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      club_family: event.target
-                        .value as TestSwingLabels["club_family"],
-                    })
-                  }
-                >
-                  {CLUB_FAMILIES.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Intent">
-                <SelectInput
-                  value={draft.labels.intent}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      intent: event.target.value as TestSwingLabels["intent"],
-                    })
-                  }
-                >
-                  {INTENTS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Angle">
-                <SelectInput
-                  value={draft.labels.angle}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      angle: event.target.value as TestSwingLabels["angle"],
-                    })
-                  }
-                >
-                  {TEST_SWING_ANGLES.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Frame rate">
-                <TextInput
-                  type="number"
-                  min={1}
-                  max={480}
-                  step="0.01"
-                  value={draft.labels.frame_rate}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      frame_rate: Number(event.target.value),
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Camera yaw marker">
-                <SelectInput
-                  value={draft.labels.camera_yaw_marker}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      camera_yaw_marker: Number(
+              <option value="">—</option>
+              {CLUB_FAMILIES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Intent">
+            <SelectInput
+              value={labels.intent ?? ""}
+              onChange={(event) =>
+                patch({
+                  intent: (event.target.value ||
+                    null) as TestSwingLabels["intent"],
+                })
+              }
+            >
+              <option value="">—</option>
+              {INTENTS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Angle">
+            <SelectInput
+              value={labels.angle ?? ""}
+              onChange={(event) =>
+                patch({
+                  angle: (event.target.value ||
+                    null) as TestSwingLabels["angle"],
+                })
+              }
+            >
+              <option value="">—</option>
+              {TEST_SWING_ANGLES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Frame rate">
+            <TextInput
+              type="number"
+              min={1}
+              max={480}
+              value={labels.frame_rate ?? ""}
+              onChange={(event) =>
+                patch({
+                  frame_rate: event.target.value
+                    ? Number(event.target.value)
+                    : null,
+                })
+              }
+            />
+          </Field>
+          <Field label="Camera yaw marker">
+            <SelectInput
+              value={labels.camera_yaw_marker ?? ""}
+              onChange={(event) =>
+                patch({
+                  camera_yaw_marker: event.target.value
+                    ? (Number(
                         event.target.value,
-                      ) as TestSwingLabels["camera_yaw_marker"],
-                    })
-                  }
-                >
-                  {CAMERA_YAW_MARKERS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Capture path">
-                <SelectInput
-                  value={draft.labels.capture_path}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      capture_path: event.target
-                        .value as TestSwingLabels["capture_path"],
-                    })
-                  }
-                >
-                  {TEST_CAPTURE_PATHS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Handedness">
-                <SelectInput
-                  value={draft.labels.handedness}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      handedness: event.target
-                        .value as TestSwingLabels["handedness"],
-                    })
-                  }
-                >
-                  {HANDEDNESS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Consecutive group">
-                <TextInput
-                  value={draft.labels.consecutive_group ?? ""}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      consecutive_group: event.target.value || null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Pro label fault 1">
-                <TextInput
-                  value={draft.labels.pro_label_fault_1 ?? ""}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      pro_label_fault_1: event.target.value || null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Pro label fault 2">
-                <TextInput
-                  value={draft.labels.pro_label_fault_2 ?? ""}
-                  onChange={(event) =>
-                    updateDraft(index, {
-                      pro_label_fault_2: event.target.value || null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Notes">
-                <TextArea
-                  value={draft.labels.notes ?? ""}
-                  onChange={(event) =>
-                    updateDraft(index, { notes: event.target.value || null })
-                  }
-                />
-              </Field>
-            </fieldset>
-          ))}
-        </div>
+                      ) as TestSwingLabels["camera_yaw_marker"])
+                    : null,
+                })
+              }
+            >
+              <option value="">—</option>
+              {CAMERA_YAW_MARKERS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Capture path">
+            <SelectInput
+              value={labels.capture_path ?? ""}
+              onChange={(event) =>
+                patch({
+                  capture_path: (event.target.value ||
+                    null) as TestSwingLabels["capture_path"],
+                })
+              }
+            >
+              <option value="">—</option>
+              {TEST_CAPTURE_PATHS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Handedness">
+            <SelectInput
+              value={labels.handedness ?? ""}
+              onChange={(event) =>
+                patch({
+                  handedness: (event.target.value ||
+                    null) as TestSwingLabels["handedness"],
+                })
+              }
+            >
+              <option value="">—</option>
+              {HANDEDNESS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Consecutive group">
+            <TextInput
+              value={labels.consecutive_group ?? ""}
+              onChange={(event) =>
+                patch({ consecutive_group: event.target.value || null })
+              }
+            />
+          </Field>
+          <Field label="Pro label fault 1">
+            <TextInput
+              value={labels.pro_label_fault_1 ?? ""}
+              onChange={(event) =>
+                patch({ pro_label_fault_1: event.target.value || null })
+              }
+            />
+          </Field>
+          <Field label="Pro label fault 2">
+            <TextInput
+              value={labels.pro_label_fault_2 ?? ""}
+              onChange={(event) =>
+                patch({ pro_label_fault_2: event.target.value || null })
+              }
+            />
+          </Field>
+          <Field label="Notes">
+            <TextArea
+              value={labels.notes ?? ""}
+              onChange={(event) => patch({ notes: event.target.value || null })}
+            />
+          </Field>
+        </fieldset>
         <button
           type="submit"
-          disabled={busy || drafts.length === 0}
+          disabled={busy || !file}
           className="mt-4 min-h-11 rounded-xl bg-[#c8f542] px-4 font-semibold text-[#0b1210] disabled:opacity-50"
         >
-          {busy ? "Uploading…" : "Upload labeled clips"}
+          {busy ? "Uploading…" : "Upload clip"}
         </button>
         {status ? (
           <p className="mt-3 text-sm text-[#c8f542]">{status}</p>
@@ -384,10 +361,7 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
                   "Yaw",
                   "Path",
                   "Hand",
-                  "Group",
-                  "Fault 1",
-                  "Fault 2",
-                  "Notes",
+                  "Pose",
                   "Clip",
                 ].map((header) => (
                   <th key={header} className="px-3 py-2 font-medium">
@@ -399,7 +373,7 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
             <tbody>
               {swings.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3 py-6 text-white/45">
+                  <td colSpan={10} className="px-3 py-6 text-white/45">
                     No clips yet.
                   </td>
                 </tr>
@@ -407,40 +381,39 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
                 swings.map((swing) => (
                   <tr key={swing.id} className="border-t border-white/10">
                     <td className="px-3 py-2 font-semibold text-[#c8f542]">
-                      {swing.golfer_label}
+                      {swing.golfer_label ?? "—"}
                     </td>
-                    <td className="px-3 py-2">{swing.club_family}</td>
-                    <td className="px-3 py-2">{swing.intent}</td>
-                    <td className="px-3 py-2">{swing.angle}</td>
-                    <td className="px-3 py-2">{swing.frame_rate}</td>
-                    <td className="px-3 py-2">{swing.camera_yaw_marker}</td>
-                    <td className="px-3 py-2">{swing.capture_path}</td>
-                    <td className="px-3 py-2">{swing.handedness}</td>
+                    <td className="px-3 py-2">{swing.club_family ?? "—"}</td>
+                    <td className="px-3 py-2">{swing.intent ?? "—"}</td>
+                    <td className="px-3 py-2">{swing.angle ?? "—"}</td>
+                    <td className="px-3 py-2">{swing.frame_rate ?? "—"}</td>
                     <td className="px-3 py-2">
-                      {swing.consecutive_group ?? "—"}
+                      {swing.camera_yaw_marker ?? "—"}
+                    </td>
+                    <td className="px-3 py-2">{swing.capture_path ?? "—"}</td>
+                    <td className="px-3 py-2">{swing.handedness ?? "—"}</td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        disabled={runningId === swing.id}
+                        onClick={() => void runPose(swing)}
+                        className="rounded-lg bg-[#c8f542] px-2 py-1 font-semibold text-[#0b1210] disabled:opacity-50"
+                      >
+                        {runningId === swing.id ? "Running…" : "Run pose"}
+                      </button>
+                      {swing.keypoints ? (
+                        <span className="ml-2 text-white/45">
+                          {swing.keypoints.keypoints.length} frames
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2">
-                      {swing.pro_label_fault_1 ?? "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      {swing.pro_label_fault_2 ?? "—"}
-                    </td>
-                    <td className="max-w-48 truncate px-3 py-2">
-                      {swing.notes ?? "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      {swing.signed_url ? (
-                        <a
-                          href={swing.signed_url}
-                          className="text-[#c8f542] underline"
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          signed
-                        </a>
-                      ) : (
-                        "—"
-                      )}
+                      <a
+                        href={`/admin/preview?swing=${swing.id}`}
+                        className="text-[#c8f542] underline"
+                      >
+                        preview
+                      </a>
                     </td>
                   </tr>
                 ))

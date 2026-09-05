@@ -1,6 +1,5 @@
--- DialItIn Phase 0b: filming-day test set + pose preview.
--- Test clips are data, not coaching content — no versioning.
--- Source of truth: docs/DialItIn_Design_Rev25.docx §4b.4 / roadmap 0b.
+-- DialItIn filming-day test set (superseded column layout).
+-- Adapted to Rev 27 by 20260905183000_test_set.sql.
 
 CREATE TYPE public.swing_view_angle AS ENUM ('dtl', 'face_on');
 CREATE TYPE public.handedness AS ENUM ('right', 'left');
