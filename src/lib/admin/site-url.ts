@@ -1,12 +1,23 @@
+const APEX_SITE_URL = "https://dialitin.ai";
+
 export function getSiteUrl() {
   const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
   if (fromEnv) {
-    return fromEnv;
+    return canonicalizeSiteUrl(fromEnv);
   }
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  return APEX_SITE_URL;
+}
+
+function canonicalizeSiteUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "www.dialitin.ai") {
+      parsed.hostname = "dialitin.ai";
+    }
+    return parsed.origin;
+  } catch {
+    return url;
   }
-  return "https://www.dialitin.ai";
 }
 
 export function getMagicLinkRedirectTo() {

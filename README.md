@@ -13,7 +13,7 @@ cp .env.example .env.local
 
 Fill `.env.local` with your Supabase Project URL, publishable key, and secret key.
 
-Canonical site URL is `https://www.dialitin.ai`. The Vercel `*.vercel.app` alias remains a working host. Magic-link redirect is always `/admin/auth/callback`.
+Canonical site URL is `https://dialitin.ai`. `www.dialitin.ai` should 308 to the apex. Magic-link `emailRedirectTo` is always built from `NEXT_PUBLIC_SITE_URL`, never the request host.
 
 ```bash
 npm run dev
@@ -22,8 +22,6 @@ npm run check
 
 ## Supabase Auth redirect URLs
 
-Add these Site URL / Redirect URL entries in Supabase Auth (Authentication → URL Configuration) so magic links work on every host:
+Keep the Supabase Auth Site URL as `https://dialitin.ai`. Add this Redirect URL so magic links exchange on the apex:
 
-- `https://www.dialitin.ai/admin/auth/callback`
 - `https://dialitin.ai/admin/auth/callback`
-- the current `*.vercel.app/admin/auth/callback` alias
