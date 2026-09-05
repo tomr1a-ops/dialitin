@@ -148,3 +148,42 @@ export function padLandmarks(pose: PoseLandmark[] | undefined): PoseLandmark[] {
   }
   return next;
 }
+
+/**
+ * Pose ran on a crop of the 640-short-side canvas. Map crop-normalized
+ * landmarks through that crop, divide by the downscale, then re-normalize
+ * against the full-resolution crop so reveal can draw on the source video.
+ */
+export function scalePoseToFullFrame(
+  landmarks: PoseLandmark[],
+  downscaledCrop: CropBox,
+  scale: number,
+  frameWidth: number,
+  frameHeight: number,
+): { landmarks: PoseLandmark[]; crop: CropBox } {
+  const safeScale = scale > 0 ? scale : 1;
+  const crop = clampCrop(
+    {
+      x: downscaledCrop.x / safeScale,
+      y: downscaledCrop.y / safeScale,
+      width: downscaledCrop.width / safeScale,
+      height: downscaledCrop.height / safeScale,
+    },
+    frameWidth,
+    frameHeight,
+  );
+  return {
+    crop,
+    landmarks: landmarks.map((point) => {
+      const fullX =
+        (downscaledCrop.x + point.x * downscaledCrop.width) / safeScale;
+      const fullY =
+        (downscaledCrop.y + point.y * downscaledCrop.height) / safeScale;
+      return {
+        x: crop.width > 0 ? (fullX - crop.x) / crop.width : 0,
+        y: crop.height > 0 ? (fullY - crop.y) / crop.height : 0,
+        visibility: point.visibility,
+      };
+    }),
+  };
+}

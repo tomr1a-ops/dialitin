@@ -27,20 +27,13 @@ self.onmessage = async (event) => {
   const data = event.data;
   try {
     if (data.type === "init") {
-      try {
-        landmarker = await createLandmarker(
-          "GPU",
-          data.wasmPath,
-          data.modelPath,
-        );
-      } catch {
-        landmarker = await createLandmarker(
-          "CPU",
-          data.wasmPath,
-          data.modelPath,
-        );
-      }
-      self.postMessage({ type: "ready" });
+      const delegate = data.delegate === "CPU" ? "CPU" : "GPU";
+      landmarker = await createLandmarker(
+        delegate,
+        data.wasmPath,
+        data.modelPath,
+      );
+      self.postMessage({ type: "ready", delegate });
       return;
     }
 

@@ -264,6 +264,9 @@ export function RevealView() {
         data-pose-fps={result.poseFpsProcessed.toFixed(2)}
         data-resolution={`${result.resolution.width}x${result.resolution.height}`}
         data-capture-path={result.capturePath}
+        data-pose-backend={result.poseBackend}
+        data-pose-delegate={result.poseDelegate}
+        data-pose-watchdog={result.poseWatchdogHit ? "1" : "0"}
       >
         <p>
           {result.capturePath} · {result.resolution.width}×
@@ -272,7 +275,8 @@ export function RevealView() {
         </p>
         <p>
           {result.frameCount} timestamps · {result.keypoints.length} pose frames
-          · {result.poseBackend}
+          · {result.poseBackend}/{result.poseDelegate}
+          {result.poseWatchdogHit ? " · watchdog" : ""}
         </p>
       </footer>
     </main>

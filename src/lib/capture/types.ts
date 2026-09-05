@@ -42,6 +42,8 @@ export type IngestResult = {
   poseFpsProcessed: number;
   poseElapsedMs: number;
   poseBackend: "worker" | "main-thread" | "unavailable";
+  poseDelegate: "GPU" | "CPU" | "unavailable";
+  poseWatchdogHit: boolean;
   grantedCamera?: MediaTrackSettings;
 };
 

@@ -4,13 +4,17 @@ import type {
   OrientationSample,
 } from "@/lib/capture/types";
 import { detectFrameRate } from "@/lib/ingest/detect-frame-rate";
-import { grabVideoBitmap } from "@/lib/pose/frame-bitmap";
+import {
+  drawVideoToPoseCanvas,
+  grabCanvasBitmap,
+} from "@/lib/pose/frame-bitmap";
 import {
   cropFromPerson,
   fullFrameCrop,
   padLandmarks,
   pickLargestCentralPerson,
   recenterCropOnHips,
+  scalePoseToFullFrame,
 } from "@/lib/pose/isolate";
 import { createPoseRuntime, type PoseRuntime } from "@/lib/pose/pose-runtime";
 import type { CropBox, PoseFrame } from "@/lib/pose/types";
@@ -88,17 +92,16 @@ function attachAnalyser(
   audio.connected = true;
 }
 
-async function poseOnBitmap(
+async function poseOnCanvas(
   runtime: PoseRuntime | null,
-  video: HTMLVideoElement,
+  canvas: OffscreenCanvas,
   crop: CropBox | null,
   timestampMs: number,
 ) {
   if (!runtime) {
     return [];
   }
-  const bitmap = grabVideoBitmap(video, crop);
-  return runtime.detect(bitmap, timestampMs);
+  return runtime.detect(grabCanvasBitmap(canvas, crop), timestampMs);
 }
 
 export async function ingestClip(
@@ -127,8 +130,11 @@ export async function ingestClip(
   let crop: CropBox | null = null;
   let poseRuntime: PoseRuntime | null = null;
   let poseBackend: IngestResult["poseBackend"] = "unavailable";
+  let poseDelegate: IngestResult["poseDelegate"] = "unavailable";
+  let poseWatchdogHit = false;
   let poseStartedAt = 0;
   let detectStamp = 1;
+  const poseCanvas = new OffscreenCanvas(2, 2);
 
   const finish = () => {
     finished = true;
@@ -144,12 +150,22 @@ export async function ingestClip(
       phase: "pose-init",
     });
     try {
-      const started = await createPoseRuntime();
+      const started = await Promise.race([
+        createPoseRuntime(),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(
+            () => reject(new Error("Pose runtime init timed out")),
+            20000,
+          );
+        }),
+      ]);
       poseRuntime = started.runtime;
       poseBackend = started.backend;
+      poseDelegate = started.delegate;
     } catch {
       poseRuntime = null;
       poseBackend = "unavailable";
+      poseDelegate = "unavailable";
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -171,6 +187,7 @@ export async function ingestClip(
           const watchdog = window.setTimeout(
             () => {
               if (!finished) {
+                poseWatchdogHit = true;
                 finish();
                 resolve();
               }
@@ -178,11 +195,25 @@ export async function ingestClip(
             Math.ceil(durationMs) + 20000,
           );
 
+          let processing = false;
+          let playEnded = false;
+
+          const settle = () => {
+            if (finished || processing) {
+              return;
+            }
+            if (playEnded || video.ended) {
+              window.clearTimeout(watchdog);
+              finish();
+              resolve();
+            }
+          };
+
           const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
             if (finished) {
               return;
             }
-            video.pause();
+            processing = true;
             void (async () => {
               try {
                 timestamps.push(metadata.mediaTime);
@@ -190,27 +221,26 @@ export async function ingestClip(
                   audioRms.push(sampleAnalyserRms(audio.analyser, timeDomain));
                 }
 
-                const frameWidth = video.videoWidth;
-                const frameHeight = video.videoHeight;
+                const work = drawVideoToPoseCanvas(video, poseCanvas);
 
                 if (!crop) {
-                  const isolationPoses = await poseOnBitmap(
+                  const isolationPoses = await poseOnCanvas(
                     poseRuntime,
-                    video,
+                    work.canvas,
                     null,
                     detectStamp,
                   );
                   detectStamp += 1;
                   const golfer = pickLargestCentralPerson(isolationPoses);
                   crop = golfer
-                    ? (cropFromPerson(golfer, frameWidth, frameHeight) ??
-                      fullFrameCrop(frameWidth, frameHeight))
-                    : fullFrameCrop(frameWidth, frameHeight);
+                    ? (cropFromPerson(golfer, work.width, work.height) ??
+                      fullFrameCrop(work.width, work.height))
+                    : fullFrameCrop(work.width, work.height);
                 }
 
-                const croppedPoses = await poseOnBitmap(
+                const croppedPoses = await poseOnCanvas(
                   poseRuntime,
-                  video,
+                  work.canvas,
                   crop,
                   detectStamp,
                 );
@@ -218,17 +248,24 @@ export async function ingestClip(
                 const tracked =
                   pickLargestCentralPerson(croppedPoses) ?? croppedPoses[0];
                 const landmarks = padLandmarks(tracked);
-                keypoints.push({
-                  mediaTime: metadata.mediaTime,
+                const mapped = scalePoseToFullFrame(
                   landmarks,
                   crop,
+                  work.scale,
+                  work.frameWidth,
+                  work.frameHeight,
+                );
+                keypoints.push({
+                  mediaTime: metadata.mediaTime,
+                  landmarks: mapped.landmarks,
+                  crop: mapped.crop,
                 });
                 if (tracked) {
                   crop = recenterCropOnHips(
                     crop,
                     landmarks,
-                    frameWidth,
-                    frameHeight,
+                    work.width,
+                    work.height,
                   );
                 }
 
@@ -240,38 +277,18 @@ export async function ingestClip(
               } catch {
                 // Keep streaming even if a single pose frame fails.
               } finally {
-                const duration = Number.isFinite(video.duration)
-                  ? video.duration
-                  : metadata.mediaTime + 1;
-                const nextTime = metadata.mediaTime + 0.1;
-                const atEnd = video.ended || nextTime >= duration - 0.01;
-                if (!finished && !atEnd) {
-                  const continueFrom = () => {
-                    if (finished) {
-                      return;
-                    }
-                    frameHandle = video.requestVideoFrameCallback(onFrame);
-                    video.play().catch(() => {
-                      if (!finished) {
-                        window.clearTimeout(watchdog);
-                        finish();
-                        resolve();
-                      }
-                    });
-                  };
-                  if (Math.abs(video.currentTime - nextTime) > 0.03) {
-                    video.addEventListener("seeked", continueFrom, {
-                      once: true,
-                    });
-                    video.currentTime = nextTime;
-                  } else {
-                    continueFrom();
-                  }
-                } else if (!finished) {
-                  window.clearTimeout(watchdog);
-                  finish();
-                  resolve();
+                processing = false;
+                if (finished) {
+                  return;
                 }
+                if (playEnded || video.ended) {
+                  settle();
+                  return;
+                }
+                if (video.paused) {
+                  void video.play().catch(() => undefined);
+                }
+                frameHandle = video.requestVideoFrameCallback(onFrame);
               }
             })();
           };
@@ -279,9 +296,8 @@ export async function ingestClip(
           video.addEventListener(
             "ended",
             () => {
-              window.clearTimeout(watchdog);
-              finish();
-              resolve();
+              playEnded = true;
+              settle();
             },
             { once: true },
           );
@@ -322,7 +338,7 @@ export async function ingestClip(
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
     const firstCrop = keypoints[0]?.crop;
     console.info(
-      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${poseBackend})${
+      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
         firstCrop
           ? ` crop=${Math.round(firstCrop.x)},${Math.round(firstCrop.y)},${Math.round(firstCrop.width)}x${Math.round(firstCrop.height)}`
           : ""
@@ -357,6 +373,8 @@ export async function ingestClip(
       poseFpsProcessed,
       poseElapsedMs,
       poseBackend,
+      poseDelegate,
+      poseWatchdogHit,
       grantedCamera: options.grantedCamera,
     };
   } catch (error) {

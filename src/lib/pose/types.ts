@@ -23,4 +23,5 @@ export const RIGHT_HIP = 24;
 export const LEFT_WRIST = 15;
 export const RIGHT_WRIST = 16;
 export const CROP_MARGIN = 0.38;
-export const POSE_MAX_EDGE = 512;
+/** Short side of the pose work canvas. Keep aspect; never upscale. */
+export const POSE_SHORT_SIDE = 640;
