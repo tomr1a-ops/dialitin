@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsonError, requireAdminApi } from "@/lib/admin/api";
 import { angleFromUnknown } from "@/lib/engine/angle";
-import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
+import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
 import { phasesFromUnknown, type SwingPhases } from "@/lib/engine/phases";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
 import {
@@ -22,7 +22,7 @@ type PoseBody = {
   angle?: unknown;
   normalized_keypoints?: PoseFrame[] | null;
   orientation?: unknown;
-  metrics?: ReturnType<typeof computeFaceOnMetrics>;
+  metrics?: ReturnType<typeof computeSwingMetrics>;
   handedness?: Handedness;
   club_family?: ClubFamily | null;
   intent?: ShotIntent | null;
@@ -56,7 +56,7 @@ export async function POST(
   const metrics =
     body.metrics ??
     (phases && angle
-      ? computeFaceOnMetrics({
+      ? computeSwingMetrics({
           frames,
           normalizedFrames: body.normalized_keypoints ?? null,
           phases,
@@ -64,6 +64,7 @@ export async function POST(
           handedness: body.handedness === "left" ? "left" : "right",
           clubFamily: body.club_family,
           intent: body.intent,
+          capturePath: null,
         })
       : null);
 

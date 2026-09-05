@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { estimateCameraAngle, angleFromUnknown } from "@/lib/engine/angle";
-import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
+import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
 import {
   AV_CLOCK_OFFSET_MS,
   AV_CLOCK_OFFSET_REASON,
@@ -205,7 +205,7 @@ describe.skipIf(!hasSupabase)("G01 phase recompute", () => {
         normalized = angleResult.normalizedFrames;
       }
 
-      const metrics = computeFaceOnMetrics({
+      const metrics = computeSwingMetrics({
         frames,
         normalizedFrames: normalized,
         phases,
@@ -213,6 +213,7 @@ describe.skipIf(!hasSupabase)("G01 phase recompute", () => {
         handedness: swing.handedness === "left" ? "left" : "right",
         clubFamily: swing.club_family as ClubFamily | null,
         intent: swing.intent as ShotIntent | null,
+        capturePath: swing.capture_path,
       });
 
       await patchKeypoints(row!.id, {

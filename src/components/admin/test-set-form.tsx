@@ -19,7 +19,7 @@ import {
   TextInput,
 } from "@/components/admin/fields";
 import { estimateCameraAngle } from "@/lib/engine/angle";
-import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
+import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
 import { AV_CLOCK_OFFSET_MS } from "@/lib/engine/phases";
 import { detectVerticalRollFromClip } from "@/lib/engine/angle-capture";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
@@ -153,7 +153,7 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         verticalRoll,
         handedness: swing.handedness ?? "right",
       });
-      const metrics = computeFaceOnMetrics({
+      const metrics = computeSwingMetrics({
         frames: result.keypoints,
         normalizedFrames: angleResult.normalizedFrames,
         phases: result.phases,
@@ -161,6 +161,13 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         handedness: swing.handedness ?? "right",
         clubFamily: swing.club_family,
         intent: swing.intent,
+        capturePath: swing.capture_path,
+        audioTransientMs:
+          result.impactDiagnostics?.audioTransientFrameIndex != null
+            ? result.keypoints[
+                result.impactDiagnostics.audioTransientFrameIndex
+              ]?.mediaTime * 1000
+            : null,
       });
       console.info(
         `[dialitin] angle-estimate ${angleResult.angle.elapsedMs.toFixed(2)}ms case=${angleResult.angle.case} valid=${angleResult.angle.valid}`,

@@ -3,19 +3,24 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { SkeletonOverlay } from "@/components/pose/skeleton-overlay";
+import { DtlMetricPhaseStill } from "@/components/admin/dtl-metric-phase-still";
 import { MetricPhaseStill } from "@/components/admin/metric-phase-still";
 import { PhaseDiagnosticChart } from "@/components/admin/phase-diagnostic-chart";
 import type { TestSwingListItem } from "@/lib/admin/test-swings";
 import type { FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
+import type { DtlMetricKey } from "@/lib/engine/metrics/dtl";
+import { activeMetricSet } from "@/lib/engine/metrics/storage";
+import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
 import { diagnose } from "@/lib/engine/diagnose";
 import {
   labeledAngleMismatch,
 } from "@/lib/engine/angle";
 import type { PhaseMark, SwingPhases } from "@/lib/engine/phases";
+import { LEFT_HIP, RIGHT_HIP, type PoseFrame } from "@/lib/pose/types";
 
 const CONTENT_VERSION = "draft";
 
-const METRIC_ORDER: FaceOnMetricKey[] = [
+const FACE_ON_METRIC_ORDER: FaceOnMetricKey[] = [
   "shoulder_rotation_top",
   "hip_rotation_top",
   "trail_knee_flexion_change",
@@ -30,6 +35,35 @@ const METRIC_ORDER: FaceOnMetricKey[] = [
   "tempo_ratio",
   "ball_position_inferred",
 ];
+
+const DTL_METRIC_ORDER: DtlMetricKey[] = [
+  "spine_tilt_address",
+  "tush_line_pelvis",
+  "tush_line_family",
+  "lead_hip_clearance_impact",
+  "spine_tilt_change",
+  "head_lift_dtl",
+  "delivery_slot",
+  "sequence_proxy",
+  "tempo_ratio",
+];
+
+function tushLineAtAddress(
+  keypoints: PoseFrame[],
+  addressIdx: number,
+  handedness: "left" | "right",
+): number | null {
+  const frame = keypoints[addressIdx];
+  if (!frame) {
+    return null;
+  }
+  const trailHip = handedness === "right" ? RIGHT_HIP : LEFT_HIP;
+  const point = frame.landmarks[trailHip];
+  if (!point || point.visibility < 0.35) {
+    return null;
+  }
+  return point.x;
+}
 
 function formatMetricValue(value: number, unit: string) {
   if (unit === "ratio" || unit === "normalized_rotation") {
@@ -75,7 +109,28 @@ export function PreviewWorkspace({
   const coverage = pose?.coverage ?? [];
   const phases = pose?.phases ?? null;
   const angle = pose?.angle ?? null;
-  const metrics = pose?.metrics ?? null;
+  const storedMetrics = pose?.metrics ?? null;
+  const activeSet = activeMetricSet(
+    storedMetrics,
+    angle?.classification.value,
+  );
+  const faceOnMetrics = storedMetrics?.face_on ?? null;
+  const dtlMetrics = storedMetrics?.dtl ?? null;
+  const wristReconstruction = useMemo(() => {
+    if (
+      activeSet !== "dtl" ||
+      !phases?.impact.valid ||
+      keypoints.length === 0
+    ) {
+      return null;
+    }
+    return reconstructLeadWristPath({
+      frames: keypoints,
+      phases,
+      handedness: selected?.handedness === "left" ? "left" : "right",
+      capturePath: selected?.capture_path ?? "upload",
+    });
+  }, [activeSet, keypoints, phases, selected?.capture_path, selected?.handedness]);
   const angleMismatch = labeledAngleMismatch(selected?.angle, angle);
   const lastMediaTime = keypoints.at(-1)?.mediaTime;
   const duration = lastMediaTime && lastMediaTime > 0 ? lastMediaTime : 1;
@@ -303,60 +358,135 @@ export function PreviewWorkspace({
                 {phases.sloMoReexportedAt30.reason ?? "near 30 fps"})
               </p>
             ) : null}
-            {!metrics ? (
+            {!faceOnMetrics && !dtlMetrics ? (
               <p className="mt-2 text-sm text-white/50">
-                Run pose on /admin/test-set to compute face-on metrics.
+                Run pose on /admin/test-set to compute metrics.
               </p>
             ) : (
               <>
-                <div className="mt-3 overflow-x-auto rounded-2xl border border-white/10">
-                  <table className="min-w-[760px] w-full text-left text-sm">
-                    <thead className="bg-white/5 text-xs text-white/60">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">Metric</th>
-                        <th className="px-3 py-2 font-medium">Value</th>
-                        <th className="px-3 py-2 font-medium">Unit</th>
-                        <th className="px-3 py-2 font-medium">Confidence</th>
-                        <th className="px-3 py-2 font-medium">Valid</th>
-                        <th className="px-3 py-2 font-medium">Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {METRIC_ORDER.map((key) => {
-                        const row = metrics[key];
-                        return (
-                          <tr
-                            key={key}
-                            className={`border-t border-white/10 ${row.valid ? "" : "text-white/40"}`}
-                          >
-                            <td className="px-3 py-2 font-mono text-xs">
-                              {key}
-                            </td>
-                            <td className="px-3 py-2">
-                              {row.valid
-                                ? formatMetricValue(row.value, row.unit)
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-2">{row.unit}</td>
-                            <td className="px-3 py-2">
-                              {row.confidence.toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2">
-                              {row.valid ? "yes" : "no"}
-                            </td>
-                            <td className="px-3 py-2 text-white/60">
-                              {row.reason ?? "—"}
-                            </td>
+                {faceOnMetrics ? (
+                  <div
+                    className={`mt-3 ${activeSet === "dtl" ? "opacity-40" : ""}`}
+                  >
+                    <h3 className="mb-2 text-sm font-medium text-white/70">
+                      Face-on
+                      {activeSet === "dtl" ? (
+                        <span className="ml-2 text-xs text-white/45">
+                          inactive for this angle
+                        </span>
+                      ) : null}
+                    </h3>
+                    <div className="overflow-x-auto rounded-2xl border border-white/10">
+                      <table className="min-w-[760px] w-full text-left text-sm">
+                        <thead className="bg-white/5 text-xs text-white/60">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Metric</th>
+                            <th className="px-3 py-2 font-medium">Value</th>
+                            <th className="px-3 py-2 font-medium">Unit</th>
+                            <th className="px-3 py-2 font-medium">Confidence</th>
+                            <th className="px-3 py-2 font-medium">Valid</th>
+                            <th className="px-3 py-2 font-medium">Reason</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody>
+                          {FACE_ON_METRIC_ORDER.map((key) => {
+                            const row = faceOnMetrics[key];
+                            return (
+                              <tr
+                                key={key}
+                                className={`border-t border-white/10 ${row.valid ? "" : "text-white/40"}`}
+                              >
+                                <td className="px-3 py-2 font-mono text-xs">
+                                  {key}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {row.valid
+                                    ? formatMetricValue(row.value, row.unit)
+                                    : "—"}
+                                </td>
+                                <td className="px-3 py-2">{row.unit}</td>
+                                <td className="px-3 py-2">
+                                  {row.confidence.toFixed(2)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {row.valid ? "yes" : "no"}
+                                </td>
+                                <td className="px-3 py-2 text-white/60">
+                                  {row.reason ?? "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+                {dtlMetrics ? (
+                  <div
+                    className={`mt-4 ${activeSet === "face_on" ? "opacity-40" : ""}`}
+                  >
+                    <h3 className="mb-2 text-sm font-medium text-white/70">
+                      DTL
+                      {activeSet === "face_on" ? (
+                        <span className="ml-2 text-xs text-white/45">
+                          inactive for this angle
+                        </span>
+                      ) : null}
+                    </h3>
+                    <div className="overflow-x-auto rounded-2xl border border-white/10">
+                      <table className="min-w-[760px] w-full text-left text-sm">
+                        <thead className="bg-white/5 text-xs text-white/60">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Metric</th>
+                            <th className="px-3 py-2 font-medium">Value</th>
+                            <th className="px-3 py-2 font-medium">Unit</th>
+                            <th className="px-3 py-2 font-medium">Confidence</th>
+                            <th className="px-3 py-2 font-medium">Valid</th>
+                            <th className="px-3 py-2 font-medium">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {DTL_METRIC_ORDER.map((key) => {
+                            const row = dtlMetrics[key];
+                            return (
+                              <tr
+                                key={key}
+                                className={`border-t border-white/10 ${row.valid ? "" : "text-white/40"}`}
+                              >
+                                <td className="px-3 py-2 font-mono text-xs">
+                                  {key}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {row.valid
+                                    ? formatMetricValue(row.value, row.unit)
+                                    : row.unit === "family_code"
+                                      ? row.reason ?? "—"
+                                      : "—"}
+                                </td>
+                                <td className="px-3 py-2">{row.unit}</td>
+                                <td className="px-3 py-2">
+                                  {row.confidence.toFixed(2)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {row.valid ? "yes" : "no"}
+                                </td>
+                                <td className="px-3 py-2 text-white/60">
+                                  {row.reason ?? "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
                 {phases?.address.valid &&
                 phases.top.valid &&
                 phases.impact.valid &&
-                selected.signed_url ? (
+                selected.signed_url &&
+                activeSet === "face_on" ? (
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <MetricPhaseStill
                       label="Address"
@@ -375,6 +505,49 @@ export function PreviewWorkspace({
                       videoSrc={selected.signed_url}
                       timeMs={phases.impact.timeMs}
                       keypoints={keypoints}
+                    />
+                  </div>
+                ) : null}
+                {phases?.address.valid &&
+                phases.top.valid &&
+                phases.impact.valid &&
+                selected.signed_url &&
+                activeSet === "dtl" ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <DtlMetricPhaseStill
+                      label="Address"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.address.timeMs}
+                      keypoints={keypoints}
+                      tushLineX={tushLineAtAddress(
+                        keypoints,
+                        phases.address.frameIndex,
+                        selected.handedness === "left" ? "left" : "right",
+                      )}
+                    />
+                    <DtlMetricPhaseStill
+                      label="Top"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.top.timeMs}
+                      keypoints={keypoints}
+                      tushLineX={tushLineAtAddress(
+                        keypoints,
+                        phases.address.frameIndex,
+                        selected.handedness === "left" ? "left" : "right",
+                      )}
+                    />
+                    <DtlMetricPhaseStill
+                      label="Impact"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.impact.timeMs}
+                      keypoints={keypoints}
+                      tushLineX={tushLineAtAddress(
+                        keypoints,
+                        phases.address.frameIndex,
+                        selected.handedness === "left" ? "left" : "right",
+                      )}
+                      wristPath={wristReconstruction}
+                      impactFrameIndex={phases.impact.frameIndex}
                     />
                   </div>
                 ) : null}

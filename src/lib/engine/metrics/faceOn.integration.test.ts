@@ -1,9 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { estimateCameraAngle, angleFromUnknown } from "@/lib/engine/angle";
-import {
-  computeFaceOnMetrics,
-  type FaceOnMetricKey,
-} from "@/lib/engine/metrics/faceOn";
+import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
+import { type FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
 import { SLO_MO_TIMING_REASON } from "@/lib/engine/metrics/timing-gate";
 import { phasesFromUnknown } from "@/lib/engine/phases";
 import { framesFromStoredKeypoints } from "@/lib/preview/coverage";
@@ -151,7 +149,7 @@ describe.skipIf(!hasSupabase)("G01 face-on metrics report", () => {
       expect(phases).toBeTruthy();
       expect(angle).toBeTruthy();
 
-      const metrics = computeFaceOnMetrics({
+      const stored = computeSwingMetrics({
         frames,
         normalizedFrames: normalized,
         phases: phases!,
@@ -159,9 +157,11 @@ describe.skipIf(!hasSupabase)("G01 face-on metrics report", () => {
         handedness: faceOn.handedness === "left" ? "left" : "right",
         clubFamily: faceOn.club_family as ClubFamily | null,
         intent: faceOn.intent as ShotIntent | null,
+        capturePath: "native_slomo",
       });
+      const metrics = stored.face_on!;
 
-      await patchKeypoints(row!.id, { metrics });
+      await patchKeypoints(row!.id, { metrics: stored });
 
       const report: Record<string, unknown> = {
         golfer: faceOn.golfer_label,

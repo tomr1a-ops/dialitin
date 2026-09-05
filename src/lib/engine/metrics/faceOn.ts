@@ -1,5 +1,6 @@
 import type { StoredAngle } from "@/lib/engine/angle";
 import { derived, invalidDerived, type Derived } from "@/lib/engine/derived";
+import type { MetricRecord } from "@/lib/engine/metrics/types";
 import type { SwingPhases } from "@/lib/engine/phases";
 import {
   applySloMoTimingGate,
@@ -24,14 +25,7 @@ import {
   type PoseFrame,
 } from "@/lib/pose/types";
 
-/** Sec 6.1 — every stored metric is a record, never a bare number. */
-export type MetricRecord = {
-  value: number;
-  unit: string;
-  confidence: number;
-  valid: boolean;
-  reason: string | null;
-};
+export type { MetricRecord } from "@/lib/engine/metrics/types";
 
 export type FaceOnMetricKey =
   | "shoulder_rotation_top"

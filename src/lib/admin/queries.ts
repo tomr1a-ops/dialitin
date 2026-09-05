@@ -9,7 +9,7 @@ import {
 import type { VersionedRow } from "@/lib/admin/versioning";
 import { phasesFromUnknown } from "@/lib/engine/phases";
 import { angleFromUnknown } from "@/lib/engine/angle";
-import { faceOnMetricsFromUnknown } from "@/lib/engine/metrics/faceOn";
+import { swingMetricsFromUnknown } from "@/lib/engine/metrics/storage";
 import type { OrientationSample } from "@/lib/capture/types";
 import {
   framesFromStoredKeypoints,
@@ -98,7 +98,7 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
         orientation: Array.isArray(raw.orientation)
           ? (raw.orientation as OrientationSample[])
           : null,
-        metrics: faceOnMetricsFromUnknown(raw.metrics),
+        metrics: swingMetricsFromUnknown(raw.metrics),
       });
     }
   }

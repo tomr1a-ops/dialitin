@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { estimateCameraAngle } from "@/lib/engine/angle";
-import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
+import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
 import {
   AV_CLOCK_OFFSET_MS,
   AV_CLOCK_OFFSET_REASON,
@@ -81,7 +81,7 @@ export default function IngestRunnerPage() {
           verticalRoll: null,
           handedness: options.handedness ?? "right",
         });
-        const metrics = computeFaceOnMetrics({
+        const metrics = computeSwingMetrics({
           frames: result.keypoints,
           normalizedFrames: angleResult.normalizedFrames,
           phases: result.phases,
@@ -89,6 +89,7 @@ export default function IngestRunnerPage() {
           handedness: options.handedness ?? "right",
           clubFamily: options.clubFamily as never,
           intent: options.intent as never,
+          capturePath: captureKey,
         });
         return {
           ok: true,
