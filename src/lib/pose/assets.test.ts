@@ -3,6 +3,7 @@ import {
   PINNED_POSE_ASSETS,
   POSE_MODEL,
   POSE_WASM_DIR,
+  SERWIST_POSE_PRECACHE,
   TASKS_VISION_VERSION,
   bytesToMb,
 } from "@/lib/pose/assets";
@@ -24,6 +25,19 @@ describe("pinned MediaPipe asset URLs", () => {
       "/mediapipe/wasm/vision_wasm_module_internal.wasm",
       "/mediapipe/vision_bundle.mjs",
     ]);
+  });
+
+  test("precaches the ESM wasm glue the module worker imports", () => {
+    expect(SERWIST_POSE_PRECACHE.map((entry) => entry.url)).toEqual(
+      expect.arrayContaining([
+        "/mediapipe/wasm/vision_wasm_module_internal.js",
+        "/mediapipe/wasm/vision_wasm_module_internal.wasm",
+        "/mediapipe/vision_bundle.mjs",
+      ]),
+    );
+    for (const entry of SERWIST_POSE_PRECACHE) {
+      expect(entry.revision).toBe("tasks-vision-1.0.1");
+    }
   });
 
   test("formats download size in megabytes for the loading status", () => {

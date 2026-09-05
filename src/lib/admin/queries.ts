@@ -7,6 +7,7 @@ import {
   type TestSwingRow,
 } from "@/lib/admin/test-swings";
 import type { VersionedRow } from "@/lib/admin/versioning";
+import { phasesFromUnknown } from "@/lib/engine/phases";
 import {
   framesFromStoredKeypoints,
   type JointCoverage,
@@ -86,6 +87,7 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
         frame_rate_detected: Number(raw.frame_rate_detected),
         keypoints: framesFromStoredKeypoints(raw.keypoints),
         coverage: (raw.coverage ?? []) as JointCoverage[],
+        phases: phasesFromUnknown(raw.phases),
       });
     }
   }

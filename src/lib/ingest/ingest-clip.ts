@@ -3,6 +3,7 @@ import type {
   IngestResult,
   OrientationSample,
 } from "@/lib/capture/types";
+import { findSwingPhases } from "@/lib/engine/phases";
 import { detectFrameRate } from "@/lib/ingest/detect-frame-rate";
 import {
   createPoseWorkCanvas,
@@ -18,8 +19,13 @@ import {
   scalePoseToFullFrame,
 } from "@/lib/pose/isolate";
 import { createPoseRuntime, type PoseRuntime } from "@/lib/pose/pose-runtime";
+import type { PosePathId } from "@/lib/pose/capabilities";
 import type { PoseStatus } from "@/lib/pose/status";
 import type { CropBox, PoseFrame } from "@/lib/pose/types";
+
+function statusPath(path: IngestResult["posePath"]): PosePathId | undefined {
+  return path === "unavailable" ? undefined : path;
+}
 
 export type IngestProgress = PoseStatus;
 
@@ -29,6 +35,8 @@ export type IngestClipOptions = {
   fileName?: string;
   grantedCamera?: MediaTrackSettings;
   audioContext?: AudioContext;
+  handedness?: "right" | "left";
+  labeledFrameRate?: number | null;
   onProgress?: (progress: IngestProgress) => void;
 };
 
@@ -284,6 +292,7 @@ export async function ingestClip(
                   phase: "reading-body",
                   frame: timestamps.length,
                   totalFrames,
+                  path: statusPath(posePath),
                 });
               } catch (error) {
                 const message =
@@ -356,7 +365,10 @@ export async function ingestClip(
       }
     });
 
-    options.onProgress?.({ phase: "done" });
+    options.onProgress?.({
+      phase: "done",
+      path: statusPath(posePath),
+    });
     const poseElapsedMs = performance.now() - poseStartedAt;
     const poseFpsProcessed =
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
@@ -370,6 +382,17 @@ export async function ingestClip(
     );
     const rate = detectFrameRate(timestamps, options.fileName);
     const peak = audioRms.reduce((max, value) => Math.max(max, value), 0);
+    const audioSamples = audioRms.map((rms, index) => ({
+      timeMs: (timestamps[index] ?? 0) * 1000,
+      rms,
+    }));
+    const phases = findSwingPhases(keypoints, {
+      audioSamples,
+      capturePath: options.capturePath,
+      handedness: options.handedness,
+      labeledFrameRate: options.labeledFrameRate,
+      fileName: options.fileName,
+    });
 
     return {
       clip,
@@ -401,6 +424,7 @@ export async function ingestClip(
       posePath,
       poseWatchdogHit,
       grantedCamera: options.grantedCamera,
+      phases,
     };
   } catch (error) {
     URL.revokeObjectURL(clipUrl);

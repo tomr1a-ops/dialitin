@@ -29,18 +29,22 @@ export const PINNED_POSE_ASSETS: readonly PinnedAsset[] = [
   { url: "/mediapipe/vision_bundle.mjs", bytes: 155_439 },
 ];
 
-/** Gitignored binaries that Next's public glob does not already hash. */
+/** Gitignored binaries plus the ESM/classic wasm glue the module worker loads. */
 export const SERWIST_POSE_PRECACHE = [
   POSE_MODEL,
+  { url: "/mediapipe/wasm/vision_wasm_internal.js", bytes: 323_377 },
   { url: "/mediapipe/wasm/vision_wasm_internal.wasm", bytes: 11_756_954 },
+  { url: "/mediapipe/wasm/vision_wasm_nosimd_internal.js", bytes: 323_180 },
   {
     url: "/mediapipe/wasm/vision_wasm_nosimd_internal.wasm",
     bytes: 10_960_242,
   },
+  { url: "/mediapipe/wasm/vision_wasm_module_internal.js", bytes: 323_415 },
   {
     url: "/mediapipe/wasm/vision_wasm_module_internal.wasm",
     bytes: 11_756_972,
   },
+  { url: "/mediapipe/vision_bundle.mjs", bytes: 155_439 },
 ].map((asset) => ({
   url: asset.url,
   revision: `tasks-vision-${TASKS_VISION_VERSION}`,

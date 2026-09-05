@@ -21,4 +21,18 @@ describe("formatPoseStatus", () => {
       }),
     ).toBe("Reading your body… frame 12 of 90");
   });
+
+  test("reports which pose path ran on the status line", () => {
+    expect(
+      formatPoseStatus({
+        phase: "reading-body",
+        frame: 12,
+        totalFrames: 90,
+        path: "worker+GPU",
+      }),
+    ).toBe("Reading your body… worker+GPU · frame 12 of 90");
+    expect(formatPoseStatus({ phase: "done", path: "worker+GPU" })).toBe(
+      "Pose path: worker+GPU",
+    );
+  });
 });

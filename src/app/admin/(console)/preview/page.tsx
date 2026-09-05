@@ -14,8 +14,9 @@ export default async function AdminPreviewPage({
     <main>
       <h1 className="text-2xl font-semibold">Preview</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/60">
-        Pick a test swing. Clip, skeleton, joint coverage, detected frame rate,
-        and diagnose() — which is a stub until the Sec 6.4 rules engine exists.
+        Pick a test swing. Clip, phase ticks, impact still, effective vs labeled
+        frame rate, and diagnose() — still a stub until the Sec 6.4 rules engine
+        exists.
       </p>
       <div className="mt-6">
         <PreviewWorkspace

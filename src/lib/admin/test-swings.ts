@@ -1,4 +1,5 @@
 import { CLUB_FAMILIES, INTENTS } from "@/lib/admin/constants";
+import type { SwingPhases } from "@/lib/engine/phases";
 import type { JointCoverage } from "@/lib/preview/coverage";
 import type { PoseFrame } from "@/lib/pose/types";
 
@@ -45,6 +46,7 @@ export type TestSwingKeypointsRow = {
   frame_rate_detected: number;
   keypoints: PoseFrame[];
   coverage: JointCoverage[];
+  phases: SwingPhases | null;
 };
 
 export type TestSwingListItem = TestSwingRow & {

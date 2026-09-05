@@ -114,7 +114,9 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
     }
     setRunningId(swing.id);
     setError("");
-    setStatus(`Running Phase 0 pose on ${swing.golfer_label ?? "clip"}…`);
+    setStatus(
+      `Running pose + swing finder on ${swing.golfer_label ?? "clip"}…`,
+    );
     try {
       const response = await fetch(swing.signed_url);
       if (!response.ok) {
@@ -124,8 +126,10 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         type: "video/mp4",
       });
       const result = await ingestClip(clip, {
-        capturePath: "upload",
+        capturePath: swing.capture_path === "in_app" ? "in-app" : "upload",
         fileName: swing.storage_path,
+        handedness: swing.handedness ?? "right",
+        labeledFrameRate: swing.frame_rate,
       });
       const save = await fetch(`/api/admin/test-swings/${swing.id}/pose`, {
         method: "POST",
@@ -134,6 +138,7 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
           model_version: POSE_MODEL_VERSION,
           frame_rate_detected: result.detectedFrameRate,
           frames: result.keypoints,
+          phases: result.phases,
         }),
       });
       const json = (await save.json()) as { error?: string };

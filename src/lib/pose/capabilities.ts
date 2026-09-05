@@ -1,8 +1,5 @@
 export type PosePathId =
-  | "worker+GPU"
-  | "worker+CPU"
-  | "main-thread+GPU"
-  | "main-thread+CPU";
+  "worker+GPU" | "worker+CPU" | "main-thread+GPU" | "main-thread+CPU";
 
 export type PoseCapabilities = {
   moduleWorker: boolean;

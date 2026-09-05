@@ -152,12 +152,22 @@ class MainThreadPoseRuntime implements PoseRuntime {
   }
 }
 
-function startWorker(
+function createBundledWorker() {
+  return new Worker(new URL("./pose.worker.ts", import.meta.url), {
+    type: "module",
+  });
+}
+
+function createPublicWorker() {
+  return new Worker("/mediapipe/pose-worker.js", { type: "module" });
+}
+
+function startWorkerInstance(
+  worker: Worker,
   delegate: PoseDelegate,
   timeoutMs: number,
 ): Promise<{ worker: Worker; delegate: PoseDelegate }> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker("/mediapipe/pose-worker.js", { type: "module" });
     const { wasmPath, modelPath } = pinnedFileset();
     const timer = window.setTimeout(() => {
       worker.terminate();
@@ -192,6 +202,23 @@ function startWorker(
     worker.addEventListener("error", onError);
     worker.postMessage({ type: "init", wasmPath, modelPath, delegate });
   });
+}
+
+async function startWorker(
+  delegate: PoseDelegate,
+  timeoutMs: number,
+): Promise<{ worker: Worker; delegate: PoseDelegate }> {
+  const factories = [createBundledWorker, createPublicWorker];
+  const failures: string[] = [];
+  for (const factory of factories) {
+    try {
+      return await startWorkerInstance(factory(), delegate, timeoutMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(message);
+    }
+  }
+  throw new Error(failures.join(" → "));
 }
 
 async function startPath(plan: PosePathPlan): Promise<PoseRuntimeStart> {

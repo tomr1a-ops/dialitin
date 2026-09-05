@@ -24,7 +24,7 @@ const mediapipeCache: RuntimeCaching = {
     cacheName: "mediapipe-assets",
     plugins: [
       new ExpirationPlugin({
-        maxEntries: 16,
+        maxEntries: 24,
         maxAgeSeconds: 365 * 24 * 60 * 60,
         maxAgeFrom: "last-used",
       }),

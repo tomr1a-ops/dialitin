@@ -135,7 +135,10 @@ export function RevealView() {
           onProgress: setStatus,
         });
         setResult(next);
-        setStatus({ phase: "done" });
+        setStatus({
+          phase: "done",
+          path: next.posePath === "unavailable" ? undefined : next.posePath,
+        });
         updateCaptureSession({ result: next, poseError: null });
       } catch (error) {
         const explained = explainPoseFailure(error);
@@ -196,6 +199,22 @@ export function RevealView() {
     video.playbackRate = slowMo ? 0.25 : 1;
   }, [slowMo]);
 
+  const trim = result?.phases.trim;
+  const swingFound = Boolean(result?.phases.impact.valid);
+  const windowStart = trim?.valid ? trim.value.startMs / 1000 : 0;
+  const windowEnd = trim?.valid
+    ? trim.value.endMs / 1000
+    : Math.max(result?.durationSeconds ?? 0.001, 0.001);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !trim?.valid) {
+      return;
+    }
+    video.currentTime = trim.value.startMs / 1000;
+    setCurrentTime(trim.value.startMs / 1000);
+  }, [trim]);
+
   if (!session) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center px-6">
@@ -212,7 +231,8 @@ export function RevealView() {
     );
   }
 
-  const duration = Math.max(result?.durationSeconds ?? 0.001, 0.001);
+  const duration = Math.max(windowEnd - windowStart, 0.001);
+  const clipDuration = Math.max(result?.durationSeconds ?? windowEnd, 0.001);
   const statusText = status ? formatPoseStatus(status) : "";
 
   async function togglePlay() {
@@ -221,6 +241,9 @@ export function RevealView() {
       return;
     }
     if (video.paused) {
+      if (trim?.valid && video.currentTime >= windowEnd - 0.02) {
+        video.currentTime = windowStart;
+      }
       await video.play();
       setPlaying(true);
     } else {
@@ -234,7 +257,7 @@ export function RevealView() {
     if (!video) {
       return;
     }
-    video.currentTime = Math.min(Math.max(time, 0), duration);
+    video.currentTime = Math.min(Math.max(time, windowStart), windowEnd);
   }
 
   return (
@@ -245,8 +268,11 @@ export function RevealView() {
       >
         Start over
       </Link>
-      <h1 className="mt-4 text-[1.35rem] font-semibold tracking-tight">
-        Swing found
+      <h1
+        className="mt-4 text-[1.35rem] font-semibold tracking-tight"
+        data-swing-found={swingFound ? "1" : "0"}
+      >
+        {swingFound ? "Swing found" : "Finding your swing"}
       </h1>
       <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">
         <video
@@ -255,9 +281,17 @@ export function RevealView() {
           src={session.clipUrl}
           playsInline
           preload="auto"
-          onTimeUpdate={(event) =>
-            setCurrentTime(event.currentTarget.currentTime)
-          }
+          onTimeUpdate={(event) => {
+            const time = event.currentTarget.currentTime;
+            if (trim?.valid && time >= windowEnd) {
+              event.currentTarget.pause();
+              event.currentTarget.currentTime = windowEnd;
+              setPlaying(false);
+              setCurrentTime(windowEnd);
+              return;
+            }
+            setCurrentTime(time);
+          }}
           onEnded={() => setPlaying(false)}
         />
         <canvas
@@ -315,13 +349,13 @@ export function RevealView() {
       </div>
 
       <label className="mt-4 text-sm text-white/60">
-        {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+        {currentTime.toFixed(2)}s / {clipDuration.toFixed(2)}s
         <input
           type="range"
-          min={0}
-          max={duration}
+          min={windowStart}
+          max={windowEnd}
           step={0.01}
-          value={Math.min(currentTime, duration)}
+          value={Math.min(Math.max(currentTime, windowStart), windowEnd)}
           onChange={(event) => seek(Number(event.target.value))}
           className="mt-2 w-full"
         />
@@ -334,7 +368,9 @@ export function RevealView() {
             type="button"
             aria-label={`${time.toFixed(3)} seconds`}
             className="absolute top-1 h-6 w-px bg-white/45"
-            style={{ left: `${(time / duration) * 100}%` }}
+            style={{
+              left: `${((time - windowStart) / duration) * 100}%`,
+            }}
             onClick={() => seek(time)}
           />
         ))}
