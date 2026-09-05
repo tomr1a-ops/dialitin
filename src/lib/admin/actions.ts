@@ -4,41 +4,65 @@ import { redirect } from "next/navigation";
 import { isAllowedAdminEmail, requireAdmin } from "@/lib/admin/auth";
 import { isContentKind, type ContentKind } from "@/lib/admin/constants";
 import { validateFeelCue } from "@/lib/admin/feel-cue";
-import { getMagicLinkRedirectTo } from "@/lib/admin/site-url";
+import {
+  buildAdminOtpSendParams,
+  buildAdminOtpVerifyParams,
+} from "@/lib/admin/otp";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export type ActionResult =
   { ok: true; id: string } | { ok: false; error: string };
 
-export async function requestAdminMagicLink(
+export async function requestAdminEmailOtp(
   email: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const trimmed = email.trim().toLowerCase();
-  if (!trimmed || !trimmed.includes("@")) {
+  const params = buildAdminOtpSendParams(email);
+  if (!params.email || !params.email.includes("@")) {
     return { ok: false, error: "Enter an admin email." };
   }
 
-  const allowed = await isAllowedAdminEmail(trimmed);
+  const allowed = await isAllowedAdminEmail(params.email);
   if (!allowed) {
     return {
       ok: false,
-      error:
-        "This email is not on the admin list.",
+      error: "This email is not on the admin list.",
     };
   }
 
   const supabase = await createServerSupabaseClient();
-  const { error } = await supabase.auth.signInWithOtp({
-    email: trimmed,
-    options: {
-      emailRedirectTo: getMagicLinkRedirectTo(),
-      shouldCreateUser: true,
-    },
-  });
+  const { error } = await supabase.auth.signInWithOtp(params);
   if (error) {
     return { ok: false, error: error.message };
   }
   return { ok: true };
+}
+
+export async function verifyAdminEmailOtp(
+  email: string,
+  token: string,
+): Promise<{ ok: false; error: string }> {
+  const params = buildAdminOtpVerifyParams(email, token);
+  if (!params.email || !params.email.includes("@")) {
+    return { ok: false, error: "Enter an admin email." };
+  }
+  if (!/^\d{6,8}$/.test(params.token)) {
+    return { ok: false, error: "Enter the 6-digit code from your email." };
+  }
+
+  const allowed = await isAllowedAdminEmail(params.email);
+  if (!allowed) {
+    return {
+      ok: false,
+      error: "This email is not on the admin list.",
+    };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { error } = await supabase.auth.verifyOtp(params);
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  redirect("/admin/content");
 }
 
 export async function signOutAdmin() {
