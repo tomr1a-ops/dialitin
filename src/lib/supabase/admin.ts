@@ -1,17 +1,32 @@
 import { createClient } from "@supabase/supabase-js";
 
-export function createServiceRoleClient() {
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getSecretConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
 
-  if (!url || !serviceRoleKey) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !secretKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY");
   }
 
-  return createClient(url, serviceRoleKey, {
+  return { url, secretKey };
+}
+
+export function createSecretSupabaseClient() {
+  const { url, secretKey } = getSecretConfig();
+
+  return createClient(url, secretKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+}
+
+export async function pingSupabaseSecret() {
+  const { url, secretKey } = getSecretConfig();
+  const res = await fetch(`${url}/rest/v1/`, {
+    headers: { apikey: secretKey },
+    cache: "no-store",
+  });
+  return res.ok;
 }

@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { SupabasePublishableReady } from "@/components/supabase/publishable-ready";
 
 export default function Home() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-6 py-10">
+      <SupabasePublishableReady />
       <div className="flex w-full max-w-[22rem] flex-col items-center text-center">
         <h1 className="text-[1.75rem] font-semibold leading-tight tracking-tight text-white">
           One Swing. One Problem. One Fix.

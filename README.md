@@ -9,7 +9,7 @@ npm install
 cp .env.example .env.local
 ```
 
-Fill `.env.local` with your Supabase Project URL, anon key, and service_role key.
+Fill `.env.local` with your Supabase Project URL, publishable key, and secret key.
 
 ```bash
 npm run dev
