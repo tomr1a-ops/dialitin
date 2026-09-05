@@ -362,7 +362,7 @@ export async function ingestClip(
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
     const firstCrop = keypoints[0]?.crop;
     console.info(
-      `[swingread] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${posePath}, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
+      `[dialitin] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${posePath}, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
         firstCrop
           ? ` crop=${Math.round(firstCrop.x)},${Math.round(firstCrop.y)},${Math.round(firstCrop.width)}x${Math.round(firstCrop.height)}`
           : ""

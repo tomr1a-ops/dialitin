@@ -27,7 +27,7 @@ export function AdminLoginForm() {
     <main className="flex min-h-dvh flex-col justify-center px-5 py-10">
       <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#101916] p-6">
         <p className="text-xs font-semibold tracking-[0.14em] text-[#c8f542]/80 uppercase">
-          SwingRead admin
+          DialItIn admin
         </p>
         <h1 className="mt-2 text-2xl font-semibold text-white">
           Coaching data

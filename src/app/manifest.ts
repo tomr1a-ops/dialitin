@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "SwingRead",
-    short_name: "SwingRead",
+    name: "DialItIn",
+    short_name: "DialItIn",
     description:
-      "Upload your full swing and SwingRead tells you the #1 thing holding you back — and exactly how to fix it.",
+      "Upload your full swing and DialItIn tells you the #1 thing holding you back — and exactly how to fix it.",
     start_url: "/",
     display: "standalone",
     orientation: "portrait",

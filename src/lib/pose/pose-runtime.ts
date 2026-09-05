@@ -234,11 +234,11 @@ export async function createPoseRuntime(options?: {
     }
     try {
       const started = await startPath(plan);
-      console.info(`[swingread] pose path ${started.path}`);
+      console.info(`[dialitin] pose path ${started.path}`);
       return started;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[swingread] pose path ${plan.id} failed`, message);
+      console.warn(`[dialitin] pose path ${plan.id} failed`, message);
       failures.push(`${plan.id}: ${message}`);
       if (plan.backend === "worker" && isWorkerScriptLoadFailure(message)) {
         skipRemainingWorkers = true;

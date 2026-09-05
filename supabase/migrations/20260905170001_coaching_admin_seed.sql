@@ -3,10 +3,10 @@
 -- Faults, families, protocols, and symptom→fault weights stay EMPTY.
 
 -- ---------------------------------------------------------------------------
--- admin_users
--- TODO: insert Tom's admin email when known. Do not invent an email.
---
--- INSERT INTO public.admin_users (email) VALUES ('tom@example.com');
+-- admin_users — first admin so magic link works.
+INSERT INTO public.admin_users (email)
+VALUES ('info@dialitin.ai')
+ON CONFLICT (email) DO NOTHING;
 -- ---------------------------------------------------------------------------
 
 -- Metrics from 6.1 (published v1). Units inferred from the metric definition;

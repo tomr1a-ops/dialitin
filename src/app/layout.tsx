@@ -8,10 +8,10 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const APP_NAME = "SwingRead";
+const APP_NAME = "DialItIn";
 const APP_TITLE = "One Swing. One Problem. One Fix.";
 const APP_DESCRIPTION =
-  "Upload your full swing and SwingRead tells you the #1 thing holding you back — and exactly how to fix it. No app. No subscription. Under a minute, on your phone.";
+  "Upload your full swing and DialItIn tells you the #1 thing holding you back — and exactly how to fix it. No app. No subscription. Under a minute, on your phone.";
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,

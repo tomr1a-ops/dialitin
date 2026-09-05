@@ -22,7 +22,7 @@ export function AdminShell({
               href="/admin/content"
               className="text-sm font-semibold tracking-wide text-[#c8f542]"
             >
-              SwingRead admin
+              DialItIn admin
             </Link>
             <p className="text-xs text-white/50">{email}</p>
           </div>

@@ -8,7 +8,7 @@ function drawTestFrame(ctx: CanvasRenderingContext2D, frame: number) {
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.fillStyle = "#f4f7f2";
   ctx.font = "48px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText(`SwingRead selftest ${frame}`, 36, 80);
+  ctx.fillText(`DialItIn selftest ${frame}`, 36, 80);
 }
 
 export async function runInAppPipelineSelftest(): Promise<CaptureSession> {

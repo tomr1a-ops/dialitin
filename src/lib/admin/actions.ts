@@ -23,7 +23,7 @@ export async function requestAdminMagicLink(
     return {
       ok: false,
       error:
-        "This email is not on the admin list. The seed is waiting for Tom's email.",
+        "This email is not on the admin list.",
     };
   }
 

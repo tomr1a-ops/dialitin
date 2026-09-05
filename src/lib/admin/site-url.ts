@@ -6,7 +6,7 @@ export function getSiteUrl() {
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   }
-  return "https://swingread-wine.vercel.app";
+  return "https://www.dialitin.ai";
 }
 
 export function getMagicLinkRedirectTo() {
