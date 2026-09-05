@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { SkeletonOverlay } from "@/components/pose/skeleton-overlay";
+import { MetricPhaseStill } from "@/components/admin/metric-phase-still";
 import type { TestSwingListItem } from "@/lib/admin/test-swings";
+import type { FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
 import { diagnose } from "@/lib/engine/diagnose";
 import {
   labeledAngleMismatch,
@@ -11,6 +13,32 @@ import {
 import type { PhaseMark, SwingPhases } from "@/lib/engine/phases";
 
 const CONTENT_VERSION = "draft";
+
+const METRIC_ORDER: FaceOnMetricKey[] = [
+  "shoulder_rotation_top",
+  "hip_rotation_top",
+  "trail_knee_flexion_change",
+  "hip_sway_back",
+  "hip_slide_down",
+  "head_sway",
+  "head_lift",
+  "weight_transfer_proxy",
+  "width_at_top",
+  "lead_elbow_separation",
+  "sequence_proxy",
+  "tempo_ratio",
+  "ball_position_inferred",
+];
+
+function formatMetricValue(value: number, unit: string) {
+  if (unit === "ratio" || unit === "normalized_rotation") {
+    return value.toFixed(3);
+  }
+  if (unit === "seconds") {
+    return `${(value * 1000).toFixed(1)} ms`;
+  }
+  return value.toFixed(2);
+}
 const PHASE_ORDER = [
   "address",
   "takeaway",
@@ -46,6 +74,7 @@ export function PreviewWorkspace({
   const coverage = pose?.coverage ?? [];
   const phases = pose?.phases ?? null;
   const angle = pose?.angle ?? null;
+  const metrics = pose?.metrics ?? null;
   const angleMismatch = labeledAngleMismatch(selected?.angle, angle);
   const lastMediaTime = keypoints.at(-1)?.mediaTime;
   const duration = lastMediaTime && lastMediaTime > 0 ? lastMediaTime : 1;
@@ -250,6 +279,87 @@ export function PreviewWorkspace({
                   </tbody>
                 </table>
               </div>
+            )}
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold">Metrics</h2>
+            {!metrics ? (
+              <p className="mt-2 text-sm text-white/50">
+                Run pose on /admin/test-set to compute face-on metrics.
+              </p>
+            ) : (
+              <>
+                <div className="mt-3 overflow-x-auto rounded-2xl border border-white/10">
+                  <table className="min-w-[760px] w-full text-left text-sm">
+                    <thead className="bg-white/5 text-xs text-white/60">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Metric</th>
+                        <th className="px-3 py-2 font-medium">Value</th>
+                        <th className="px-3 py-2 font-medium">Unit</th>
+                        <th className="px-3 py-2 font-medium">Confidence</th>
+                        <th className="px-3 py-2 font-medium">Valid</th>
+                        <th className="px-3 py-2 font-medium">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {METRIC_ORDER.map((key) => {
+                        const row = metrics[key];
+                        return (
+                          <tr
+                            key={key}
+                            className={`border-t border-white/10 ${row.valid ? "" : "text-white/40"}`}
+                          >
+                            <td className="px-3 py-2 font-mono text-xs">
+                              {key}
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.valid
+                                ? formatMetricValue(row.value, row.unit)
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2">{row.unit}</td>
+                            <td className="px-3 py-2">
+                              {row.confidence.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.valid ? "yes" : "no"}
+                            </td>
+                            <td className="px-3 py-2 text-white/60">
+                              {row.reason ?? "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {phases?.address.valid &&
+                phases.top.valid &&
+                phases.impact.valid &&
+                selected.signed_url ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <MetricPhaseStill
+                      label="Address"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.address.timeMs}
+                      keypoints={keypoints}
+                    />
+                    <MetricPhaseStill
+                      label="Top"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.top.timeMs}
+                      keypoints={keypoints}
+                    />
+                    <MetricPhaseStill
+                      label="Impact"
+                      videoSrc={selected.signed_url}
+                      timeMs={phases.impact.timeMs}
+                      keypoints={keypoints}
+                    />
+                  </div>
+                ) : null}
+              </>
             )}
           </section>
 

@@ -19,6 +19,7 @@ import {
   TextInput,
 } from "@/components/admin/fields";
 import { estimateCameraAngle } from "@/lib/engine/angle";
+import { computeFaceOnMetrics } from "@/lib/engine/metrics/faceOn";
 import { detectVerticalRollFromClip } from "@/lib/engine/angle-capture";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
@@ -151,6 +152,15 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         verticalRoll,
         handedness: swing.handedness ?? "right",
       });
+      const metrics = computeFaceOnMetrics({
+        frames: result.keypoints,
+        normalizedFrames: angleResult.normalizedFrames,
+        phases: result.phases,
+        angle: angleResult.angle,
+        handedness: swing.handedness ?? "right",
+        clubFamily: swing.club_family,
+        intent: swing.intent,
+      });
       console.info(
         `[dialitin] angle-estimate ${angleResult.angle.elapsedMs.toFixed(2)}ms case=${angleResult.angle.case} valid=${angleResult.angle.valid}`,
       );
@@ -164,6 +174,10 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
           phases: result.phases,
           angle: angleResult.angle,
           normalized_keypoints: angleResult.normalizedFrames,
+          metrics,
+          handedness: swing.handedness ?? "right",
+          club_family: swing.club_family,
+          intent: swing.intent,
           orientation:
             result.orientationSamples.length > 0
               ? result.orientationSamples
