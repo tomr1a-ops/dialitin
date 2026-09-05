@@ -6,4 +6,6 @@ export const { dynamic, dynamicParams, revalidate, generateStaticParams, GET } =
     swSrc: "src/app/sw.ts",
     useNativeEsbuild: true,
     additionalPrecacheEntries: [...SERWIST_POSE_PRECACHE],
+    globIgnores: ["**/tmp-fixtures/**"],
+    maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
   });
