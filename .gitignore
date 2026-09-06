@@ -55,3 +55,4 @@ public/mediapipe/pose_landmarker_lite.task
 
 # supabase CLI link cache
 /supabase/.temp/
+.env*

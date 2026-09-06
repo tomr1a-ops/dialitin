@@ -15,7 +15,7 @@
     "test:e2e": "playwright test",
     "screenshots:reveal": "playwright test e2e/reveal-screenshots.spec.ts",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
-    "harvest:run": "tsx scripts/run-harvest.ts --seed"
+    "harvest:run": "tsx --import ./scripts/ws-preload.mjs scripts/run-harvest.ts --seed"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -33,6 +33,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.27.4",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
@@ -42,6 +43,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.20.5",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "ws": "^8.21.3"
   }
 }

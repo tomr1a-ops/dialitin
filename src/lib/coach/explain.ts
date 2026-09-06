@@ -13,7 +13,7 @@ import {
   type CoachOutput,
 } from "@/lib/coach/schema";
 
-const MODEL = "claude-3-5-haiku-20241022";
+const MODEL = "claude-haiku-4-5-20251001";
 const INPUT_COST_PER_M = 0.8;
 const OUTPUT_COST_PER_M = 4;
 

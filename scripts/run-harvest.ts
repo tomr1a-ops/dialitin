@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import WebSocket from "ws";
 import { loadBandsSeedPreview, seedBandsFromReference } from "@/lib/admin/bands-seed";
 import { safeClipFileName, TEST_SWING_BUCKET } from "@/lib/admin/test-swings";
 import {
@@ -27,6 +28,10 @@ import { jointCoverage, framesFromStoredKeypoints } from "@/lib/preview/coverage
 import { createSecretSupabaseClient } from "@/lib/supabase/admin";
 import type { Handedness } from "@/lib/admin/test-swings";
 import type { PoseFrame } from "@/lib/pose/types";
+
+if (!globalThis.WebSocket) {
+  globalThis.WebSocket = WebSocket as unknown as typeof WebSocket;
+}
 
 const REFERENCE_QUERIES = [
   "Rory McIlroy driver slow motion face on",

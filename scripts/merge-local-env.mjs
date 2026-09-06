@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Merge Supabase + API keys into .env.local after `vercel env pull`.
+ * Fill missing Supabase public vars after `vercel env pull`.
+ * Never overwrites non-empty values from Vercel (especially SUPABASE_SECRET_KEY).
  * Never prints secret values.
  */
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -30,109 +30,47 @@ function parseEnv(raw) {
   return map;
 }
 
-function serializeEnv(map) {
-  const lines = ["# Generated / merged by scripts/merge-local-env.mjs"];
-  for (const [key, value] of map.entries()) {
-    lines.push(`${key}=${value}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function setIfNonEmpty(map, key, value) {
-  if (value?.trim()) {
+function setIfEmpty(map, key, value) {
+  const current = map.get(key)?.trim() ?? "";
+  if (!current && value?.trim()) {
     map.set(key, value.trim());
+    return true;
   }
-}
-
-function fromSupabaseCli() {
-  const raw = execFileSync(
-    "supabase",
-    ["projects", "api-keys", "--project-ref", "ludnczxnftmueibtbhrj", "-o", "json"],
-    { encoding: "utf8" },
-  );
-  const keys = JSON.parse(raw);
-  const secret =
-    keys.find((k) => k.name === "swingread_secret" && k.type === "secret") ??
-    keys.find((k) => k.type === "secret");
-  const pub =
-    keys.find((k) => k.name === "swingread_pub" && k.type === "publishable") ??
-    keys.find((k) => k.type === "publishable");
-  return {
-    url: "https://ludnczxnftmueibtbhrj.supabase.co",
-    secret: secret?.api_key ?? "",
-    publishable: pub?.api_key ?? "",
-  };
-}
-
-function fromBackup() {
-  const backupPath = resolve(root, ".env.local.bak-vercel-pull");
-  try {
-    const map = parseEnv(readFileSync(backupPath, "utf8"));
-    return {
-      url:
-        map.get("NEXT_PUBLIC_SUPABASE_URL") ??
-        map.get("SUPABASE_URL") ??
-        "",
-      secret:
-        map.get("SUPABASE_SECRET_KEY") ??
-        map.get("SUPABASE_SERVICE_ROLE_KEY") ??
-        "",
-      publishable:
-        map.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ??
-        map.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ??
-        "",
-    };
-  } catch {
-    return { url: "", secret: "", publishable: "" };
-  }
-}
-
-async function pingSecret(url, secret) {
-  if (!url || !secret) return false;
-  const res = await fetch(`${url}/rest/v1/`, {
-    headers: { apikey: secret },
-    cache: "no-store",
-  });
-  return res.ok;
+  return false;
 }
 
 const map = parseEnv(readFileSync(envPath, "utf8"));
-const backup = fromBackup();
-const cli = fromSupabaseCli();
+const url = "https://ludnczxnftmueibtbhrj.supabase.co";
 
-const candidates = [
-  ["backup", backup],
-  ["cli", cli],
-];
+const filled = [
+  setIfEmpty(map, "NEXT_PUBLIC_SUPABASE_URL", url),
+  setIfEmpty(map, "SUPABASE_URL", url),
+].some(Boolean);
 
-let merged = false;
-for (const [label, source] of candidates) {
-  setIfNonEmpty(map, "NEXT_PUBLIC_SUPABASE_URL", source.url);
-  setIfNonEmpty(map, "SUPABASE_URL", source.url);
-  if (source.secret && (await pingSecret(source.url, source.secret))) {
-    setIfNonEmpty(map, "SUPABASE_SECRET_KEY", source.secret);
-    setIfNonEmpty(map, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", source.publishable);
-    console.log(`Supabase secret: using ${label} (REST ping ok)`);
-    merged = true;
-    break;
+const secretLen = (map.get("SUPABASE_SECRET_KEY") ?? "").trim().length;
+if (secretLen > 0) {
+  console.log(`Supabase secret: keeping Vercel value (len=${secretLen})`);
+} else {
+  console.log("Supabase secret: MISSING — re-run vercel env pull or paste in dashboard");
+}
+
+if (filled) {
+  const lines = [];
+  for (const [key, value] of map.entries()) {
+    lines.push(`${key}=${value}`);
   }
-  console.log(`Supabase secret: ${label} REST ping failed (len=${source.secret.length})`);
+  writeFileSync(envPath, `${lines.join("\n")}\n`);
+  console.log("Merged missing public Supabase URL vars");
+} else {
+  console.log("No merge needed");
 }
 
-if (!merged && cli.secret) {
-  setIfNonEmpty(map, "SUPABASE_SECRET_KEY", cli.secret);
-  setIfNonEmpty(map, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", cli.publishable);
-  setIfNonEmpty(map, "NEXT_PUBLIC_SUPABASE_URL", cli.url);
-  setIfNonEmpty(map, "SUPABASE_URL", cli.url);
-  console.log("Supabase secret: merged CLI key (REST ping failed — may still fail writes)");
-}
-
-writeFileSync(envPath, serializeEnv(map));
 for (const k of [
   "YOUTUBE_API_KEY",
   "ANTHROPIC_API_KEY",
   "SUPABASE_SECRET_KEY",
   "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
 ]) {
   const v = map.get(k) ?? "";
   console.log(`${k}: ${v.length > 0 ? `len=${v.length}` : "MISSING"}`);
