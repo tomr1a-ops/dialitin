@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "DialItIn",
     short_name: "DialItIn",
     description:
-      "Upload your full swing and DialItIn tells you the #1 thing holding you back — and exactly how to fix it.",
+      "Upload your full swing and DialItIn tells you the #1 thing holding you back, and exactly how to fix it.",
     start_url: "/",
     display: "standalone",
     orientation: "portrait",

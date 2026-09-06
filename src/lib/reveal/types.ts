@@ -26,7 +26,9 @@ export type RevealTargetPosition = {
   bandMax: number;
 };
 
-/** Phase 2b placeholder — swap for real diagnosis output in Phase 2. */
+import type { DiagnosisOutcome } from "@/lib/engine/diagnose";
+
+/** Real diagnosis output mapped for reveal UI (Phase 2). */
 export type RevealInput = {
   fault: RevealFaultKey;
   metric: RevealMetric;
@@ -41,6 +43,15 @@ export type RevealInput = {
   bestSwingTimestamp: string;
   /** Display-only What Changed Since? (Section 6.13). */
   whatChangedSince?: WhatChangedSinceDisplay;
+  /** Engine outcome — score_internal is never surfaced in UI. */
+  outcome?: DiagnosisOutcome;
+  headline?: string;
+  coachWhy?: string;
+  gripAndFaceLine?: string;
+  insufficientData?: boolean;
+  retestDeltaPct?: number | null;
+  diagnosisId?: string;
+  swingId?: string;
 };
 
 export type WhatChangedSinceDisplay = {

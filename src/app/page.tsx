@@ -11,7 +11,7 @@ export default function Home() {
         </h1>
         <p className="mt-5 text-[0.95rem] leading-relaxed text-white/70">
           Upload your full swing and DialItIn tells you the #1 thing holding
-          you back — and exactly how to fix it. No app. No subscription. Under a
+          you back, and exactly how to fix it. No app. No subscription. Under a
           minute, on your phone.
         </p>
         <Link

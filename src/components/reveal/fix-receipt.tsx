@@ -111,7 +111,7 @@ export function FixReceipt({
     <section data-testid="reveal-fix-receipt">
       <h2 className="text-[1.35rem] font-semibold tracking-tight">Fix Receipt</h2>
       <p className="mt-1 text-sm text-white/60">
-        Evidence you can screenshot — grade never appears.
+        Evidence you can screenshot. No score on this card.
       </p>
       <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">
         <video
@@ -134,7 +134,7 @@ export function FixReceipt({
         aria-hidden
         data-testid="receipt-qr-placeholder"
       >
-        QR / deep link — inert in Phase 2b
+        QR / deep link. Inert in Phase 2b.
       </div>
     </section>
   );
@@ -245,7 +245,7 @@ function renderReceiptPng(
     ctx.fillStyle = "#888888";
     ctx.font = "12px system-ui, sans-serif";
     ctx.fillText(
-      `Before | After — paired with ${input.bestSwingTimestamp} swing`,
+      `Before | After, paired with ${input.bestSwingTimestamp} swing`,
       24,
       imgH + 168,
     );

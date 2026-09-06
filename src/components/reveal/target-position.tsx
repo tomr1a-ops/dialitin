@@ -105,7 +105,7 @@ export function TargetPosition({
         Target Position
       </h2>
       <p className="mt-1 text-sm text-white/60">
-        Your frame — one joint family moved into the band.
+        Your frame. One joint family moved into the band.
       </p>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div>

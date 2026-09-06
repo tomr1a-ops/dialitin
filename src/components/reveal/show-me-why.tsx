@@ -68,14 +68,14 @@ export function ShowMeWhy({
           <p>
             <span className="font-semibold text-white">Measured:</span>{" "}
             {metric.label} at {metric.value.toFixed(0)}% of stance width
-            (band {metric.bandMin}–{metric.bandMax}%).
+            (band {metric.bandMin} to {metric.bandMax}%).
           </p>
           <p>
             <span className="font-semibold text-white">Confidence:</span>{" "}
-            {confidencePct}% — {metric.reason}
+            {confidencePct}%. {metric.reason}
           </p>
           <p className="text-white/55">
-            We measure you, not the stick — that&apos;s why this isn&apos;t
+            We measure you, not the stick. That&apos;s why this isn&apos;t
             guessing.
           </p>
         </div>

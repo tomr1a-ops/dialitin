@@ -289,7 +289,7 @@ export function AnnotatedPlayback({
     <section data-testid="reveal-annotated-playback" data-canvas-fps={canvasFps.toFixed(1)}>
       <h2 className="text-[1.35rem] font-semibold tracking-tight">The reveal</h2>
       <p className="mt-1 text-sm text-white/60">
-        {input.guiltyLabel} — {(input.firstGuiltyFrameMs / 1000).toFixed(2)}s before
+        {input.guiltyLabel}. {(input.firstGuiltyFrameMs / 1000).toFixed(2)}s before
         the strike.
       </p>
       <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">

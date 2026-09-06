@@ -22,7 +22,7 @@ export function explainPoseFailure(error: unknown): PoseUserError {
 
   if (modelLoadFailed) {
     return {
-      userMessage: "Couldn't load the pose model — connection dropped",
+      userMessage: "Couldn't load the pose model. Connection dropped",
       technicalReason,
     };
   }

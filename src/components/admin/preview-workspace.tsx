@@ -11,14 +11,14 @@ import type { FaceOnMetricKey } from "@/lib/engine/metrics/faceOn";
 import type { DtlMetricKey } from "@/lib/engine/metrics/dtl";
 import { activeMetricSet } from "@/lib/engine/metrics/storage";
 import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
-import { diagnose } from "@/lib/engine/diagnose";
+import type { DiagnosisResult } from "@/lib/engine/diagnose";
 import {
   labeledAngleMismatch,
 } from "@/lib/engine/angle";
 import type { PhaseMark, SwingPhases } from "@/lib/engine/phases";
 import { LEFT_HIP, RIGHT_HIP, type PoseFrame } from "@/lib/pose/types";
 
-const CONTENT_VERSION = "draft";
+const CONTENT_VERSION = "published";
 
 const FACE_ON_METRIC_ORDER: FaceOnMetricKey[] = [
   "shoulder_rotation_top",
@@ -107,9 +107,11 @@ function phaseList(phases: SwingPhases) {
 export function PreviewWorkspace({
   swings,
   selectedId,
+  diagnosis: diagnosisProp = null,
 }: {
   swings: TestSwingListItem[];
   selectedId: string | null;
+  diagnosis?: DiagnosisResult | null;
 }) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -120,10 +122,7 @@ export function PreviewWorkspace({
     swings.find((swing) => swing.id === selectedId) ?? swings[0] ?? null;
   const pose = selected?.keypoints ?? null;
   const phaseMarks = pose?.phase_marks ?? {};
-  const diagnosis = useMemo(
-    () => diagnose(pose?.keypoints ?? [], CONTENT_VERSION),
-    [pose],
-  );
+  const diagnosis = diagnosisProp;
   const keypoints = pose?.keypoints ?? [];
   const coverage = pose?.coverage ?? [];
   const phases = pose?.phases ?? null;
@@ -770,7 +769,7 @@ export function PreviewWorkspace({
             <h2 className="text-lg font-semibold">Diagnosis</h2>
             {diagnosis === null ? (
               <p className="mt-2 rounded-2xl border border-white/10 bg-[#101916] px-4 py-3 text-sm text-white/70">
-                no engine yet
+                No diagnosis — select a swing with metrics.
               </p>
             ) : (
               <pre className="mt-2 overflow-x-auto rounded-2xl border border-white/10 bg-[#101916] p-4 text-xs text-white/70">

@@ -75,7 +75,7 @@ export function SwingFoundScreen({
     <section data-testid="reveal-swing-found">
       <h2 className="text-[1.35rem] font-semibold tracking-tight">Swing found</h2>
       <p className="mt-1 text-sm text-white/60">
-        Trimmed to your swing — skeleton confirms we saw you.
+        Trimmed to your swing. Skeleton confirms we saw you.
       </p>
       <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">
         <video

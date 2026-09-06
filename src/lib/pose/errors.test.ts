@@ -5,7 +5,7 @@ describe("explainPoseFailure", () => {
   test("uses plain words plus the technical reason for a dropped model download", () => {
     const explained = explainPoseFailure(new Error("Failed to fetch"));
     expect(explained.userMessage).toBe(
-      "Couldn't load the pose model — connection dropped",
+      "Couldn't load the pose model. Connection dropped",
     );
     expect(explained.technicalReason).toBe("Failed to fetch");
   });

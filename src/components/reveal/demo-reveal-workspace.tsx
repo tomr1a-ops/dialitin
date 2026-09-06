@@ -12,7 +12,7 @@ export function DemoRevealWorkspace({
     <div className="max-w-[22rem]">
       <h1 className="text-xl font-semibold tracking-tight">Reveal demo (G01)</h1>
       <p className="mt-1 text-sm text-white/60">
-        Phase 2b end-to-end with angle-matched placeholder fault.
+        Phase 2 end-to-end with real rules-engine diagnosis.
       </p>
       <div className="mt-6">
         <RevealFlow

@@ -87,7 +87,7 @@ export function BeforeAfterCompare({
         ) : null}
       </div>
       <p className="mt-1 text-sm text-white/60">
-        Synced at impact — that one ({input.bestSwingTimestamp}) didn&apos;t keep
+        Synced at impact. That one ({input.bestSwingTimestamp}) didn&apos;t keep
         the tush line.
       </p>
 

@@ -220,7 +220,7 @@ export function CaptureView() {
               <PhonePropIllustration />
               <p className="text-left text-[0.92rem] leading-snug text-white/80">
                 Shoot 1080p at 60 fps, or Slo-mo 120. Action mode off. Prop the
-                phone — don&apos;t hold it.
+                phone. Don&apos;t hold it.
               </p>
             </div>
             <input

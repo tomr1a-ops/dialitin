@@ -24,10 +24,10 @@ export function WhatChangedSince({
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2 text-[0.65rem] text-white/40">
         <span data-guard-camera={display.sameCamera ? "ok" : "blocked"}>
-          {display.sameCamera ? "Same camera" : "Different camera — compare blocked"}
+          {display.sameCamera ? "Same camera" : "Different camera. Compare blocked."}
         </span>
         <span data-guard-club={display.sameClub ? "ok" : "blocked"}>
-          {display.sameClub ? "Same club" : "Different club — compare blocked"}
+          {display.sameClub ? "Same club" : "Different club. Compare blocked."}
         </span>
       </div>
     </section>

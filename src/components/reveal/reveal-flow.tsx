@@ -8,6 +8,7 @@ import { ProcessingTheater } from "@/components/reveal/processing-theater";
 import { ShowMeWhy } from "@/components/reveal/show-me-why";
 import { SwingFoundScreen } from "@/components/reveal/swing-found-screen";
 import { TargetPosition } from "@/components/reveal/target-position";
+import { DidItWorkCapture } from "@/components/reveal/did-it-work";
 import { WhatChangedSince } from "@/components/reveal/what-changed-since";
 import type { PoseStatus } from "@/lib/pose/status";
 import { createPlaceholderRevealInput } from "@/lib/reveal/placeholder";
@@ -92,6 +93,16 @@ export function RevealFlow({
 
       {resolvedScreen === "annotated" ? (
         <>
+          {input.headline ? (
+            <p className="mb-4 text-lg font-semibold leading-snug text-white">
+              {input.headline}
+            </p>
+          ) : null}
+          {input.insufficientData ? (
+            <p className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+              {input.feelSentence}
+            </p>
+          ) : null}
           <AnnotatedPlayback
             videoSrc={session.videoSrc}
             keypoints={session.keypoints}
@@ -101,6 +112,9 @@ export function RevealFlow({
             input={input}
           />
           <ShowMeWhy input={input} />
+          {input.diagnosisId && session.retestVideoSrc ? (
+            <DidItWorkCapture diagnosisId={input.diagnosisId} />
+          ) : null}
         </>
       ) : null}
 
