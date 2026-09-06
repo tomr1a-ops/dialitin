@@ -19,10 +19,14 @@ import {
   TextInput,
 } from "@/components/admin/fields";
 import { estimateCameraAngle } from "@/lib/engine/angle";
-import { computeSwingMetrics } from "@/lib/engine/metrics/storage";
+import { computeSwingMetricsWithDiagnostics } from "@/lib/engine/metrics/storage";
 import { AV_CLOCK_OFFSET_MS } from "@/lib/engine/phases";
 import { detectVerticalRollFromClip } from "@/lib/engine/angle-capture";
 import { ingestClip } from "@/lib/ingest/ingest-clip";
+import {
+  decodeAudioFromClip,
+  extractBallFramePixels,
+} from "@/lib/ingest/extract-audio-window";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
@@ -163,7 +167,14 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         verticalRoll,
         handedness: swing.handedness ?? "right",
       });
-      const metrics = computeSwingMetrics({
+      const framePixels = await extractBallFramePixels({
+        clip,
+        frames: result.keypoints,
+        addressIndex: result.phases.address.frameIndex,
+        impactIndex: result.phases.impact.frameIndex,
+      });
+      const audio = await decodeAudioFromClip(clip);
+      const { metrics, diagnostics } = await computeSwingMetricsWithDiagnostics({
         frames: result.keypoints,
         normalizedFrames: angleResult.normalizedFrames,
         phases: result.phases,
@@ -172,6 +183,11 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         clubFamily: swing.club_family,
         intent: swing.intent,
         capturePath: swing.capture_path,
+        imageWidth: result.resolution.width,
+        imageHeight: result.resolution.height,
+        framePixels,
+        audioSamples: audio?.samples ?? null,
+        audioSampleRate: audio?.sampleRate,
         audioTransientMs:
           result.impactDiagnostics?.audioTransientFrameIndex != null
             ? result.keypoints[
@@ -196,6 +212,8 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
           angle: angleResult.angle,
           normalized_keypoints: angleResult.normalizedFrames,
           metrics,
+          strike_features: diagnostics.strike_features,
+          shot_record: diagnostics.shot_record,
           handedness: swing.handedness ?? "right",
           club_family: swing.club_family,
           intent: swing.intent,

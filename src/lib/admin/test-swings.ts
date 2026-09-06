@@ -72,6 +72,9 @@ export type TestSwingKeypointsRow = {
   orientation: OrientationSample[] | null;
   metrics: StoredSwingMetrics | null;
   phase_marks: GroundTruthPhaseMarks | null;
+  ball_labels?: Record<string, { x: number; y: number; width: number; height: number; confidence: number }> | null;
+  strike_features?: import("@/lib/engine/strike").StrikeFeatures | null;
+  strike_label?: "center" | "heel" | "toe" | "thin" | "fat" | null;
 };
 
 export type TestSwingListItem = TestSwingRow & {

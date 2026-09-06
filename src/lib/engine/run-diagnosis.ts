@@ -34,6 +34,10 @@ export type RunDiagnosisInput = {
   storageRef?: string | null;
   capturePath?: "in_app" | "native_slomo" | "upload" | null;
   keypoints?: unknown;
+  ball?: import("@/lib/engine/ball").BallAnalysis | null;
+  strike?: import("@/lib/engine/strike").StrikeAnalysis | null;
+  shotRecord?: import("@/lib/engine/ball").ShotRecordOutcome | null;
+  strikeFeatures?: import("@/lib/engine/strike").StrikeFeatures | null;
 };
 
 export type RunDiagnosisResult = {
@@ -141,6 +145,8 @@ export async function runDiagnosisPipeline(
     content,
     declaredFade: input.declaredFade,
     reportedSliceBlockShank: input.reportedSliceBlockShank,
+    ball: input.ball,
+    strike: input.strike,
   });
 
   let swingId: string | null = null;
@@ -165,6 +171,8 @@ export async function runDiagnosisPipeline(
         level,
         stated_symptom: input.statedSymptom ?? null,
         keypoints: input.keypoints ?? null,
+        strike_features: input.strikeFeatures ?? null,
+        shot_record: input.shotRecord ?? null,
       })
       .select("id")
       .single();

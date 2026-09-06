@@ -10,8 +10,10 @@ import {
   gateWeightProxyHonesty,
   type DiagnoseInput,
 } from "@/lib/engine/diagnose";
+import { derived } from "@/lib/engine/derived";
 import type { MetricEvaluation } from "@/lib/engine/evaluate";
 import type { SwingPhases } from "@/lib/engine/phases";
+import type { BallAnalysis } from "@/lib/engine/ball";
 
 const emptyPhases: SwingPhases = {
   address: { valid: false, frameIndex: 0, timeMs: 0, confidence: 0, reason: "test" },
@@ -380,6 +382,32 @@ describe("problem mode symptom-first", () => {
     );
     expect(result.mode).toBe("problem");
     expect(result.fault_key).toBe("hip_slide_down");
+  });
+});
+
+describe("start_line slice observation (6.10)", () => {
+  test("left start with stated slice adds pull-slice observation path", () => {
+    const ball: BallAnalysis = {
+      ball_position_seen: {
+        value: 0.5,
+        unit: "pct_stance",
+        confidence: 0.8,
+        valid: true,
+        reason: "seen",
+      },
+      start_line: derived("left", 0.75, true, "track"),
+      launch_direction_confidence: derived(0.75, 0.75, true, "track"),
+      address_centroid: { x: 0.5, y: 0.7 },
+      blob_found: true,
+    };
+    const result = diagnose(
+      baseInput({
+        statedSymptom: "slice",
+        ball,
+        evaluations: { hip_slide_down: passMetric() },
+      }),
+    );
+    expect(result.mode).toBe("problem");
   });
 });
 

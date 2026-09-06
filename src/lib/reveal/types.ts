@@ -52,6 +52,10 @@ export type RevealInput = {
   retestDeltaPct?: number | null;
   diagnosisId?: string;
   swingId?: string;
+  /** Normalized ball centroid at address when seen (Phase 2e). */
+  ballCentroid?: { x: number; y: number } | null;
+  /** Strike corroboration — never overrides body metric headline. */
+  strikeCorroboration?: string | null;
 };
 
 export type WhatChangedSinceDisplay = {

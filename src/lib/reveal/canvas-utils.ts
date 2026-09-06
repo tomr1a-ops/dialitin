@@ -442,6 +442,25 @@ export function drawShoulderHipLines(
   ctx.restore();
 }
 
+/** Ring on ball when blob/detector saw it at address (Phase 2e). */
+export function drawBallRing(
+  ctx: CanvasRenderingContext2D,
+  centroid: { x: number; y: number },
+  rect: ContentRect,
+  radiusPx = 14,
+) {
+  const x = rect.x + centroid.x * rect.width;
+  const y = rect.y + centroid.y * rect.height;
+  ctx.save();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = 0.9;
+  ctx.beginPath();
+  ctx.arc(x, y, radiusPx, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function stanceWidthNorm(frame: PoseFrame): number {
   const la = frame.landmarks[27];
   const ra = frame.landmarks[28];

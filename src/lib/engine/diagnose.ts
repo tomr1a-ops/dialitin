@@ -5,6 +5,8 @@ import type { MetricEvaluation } from "@/lib/engine/evaluate";
 import { catalogKeyForEngineKey } from "@/lib/engine/metric-catalog";
 import { computeDialItInScore } from "@/lib/engine/score";
 import type { SwingPhases } from "@/lib/engine/phases";
+import type { BallAnalysis } from "@/lib/engine/ball";
+import type { StrikeAnalysis } from "@/lib/engine/strike";
 
 export type DiagnosisOutcome =
   | "fault"
@@ -63,6 +65,10 @@ export type DiagnoseInput = {
   declaredFade?: boolean;
   /** Hook: reported slice/block/shank gates shallowing praise. */
   reportedSliceBlockShank?: boolean;
+  /** Phase 2e — engine-measured start line (Sec 6.10). */
+  ball?: BallAnalysis | null;
+  /** Phase 2e — strike corroboration only (never overrides body metric). */
+  strike?: StrikeAnalysis | null;
 };
 
 type Observation = {
@@ -210,6 +216,50 @@ export function gateWeightProxyHonesty(key: string): boolean {
 function buildObservations(input: DiagnoseInput): Observation[] {
   const readable = readableEvaluations(input.evaluations);
   const observations: Observation[] = [];
+
+  if (
+    input.statedSymptom === "slice" &&
+    input.ball?.start_line.valid
+  ) {
+    const line = input.ball.start_line.value;
+    if (line === "left") {
+      observations.push({
+        key: "start_line",
+        pattern: "stated slice with left start — pull-slice pattern",
+        confidence: input.ball.start_line.confidence,
+        deviation: 1,
+        evaluation: {
+          value: null,
+          band: null,
+          inBand: null,
+          deviation: null,
+          confidence: input.ball.start_line.confidence,
+          valid: true,
+          reason: input.ball.start_line.reason,
+          status: "pass",
+        },
+        isFaultCandidate: false,
+      });
+    } else if (line === "right") {
+      observations.push({
+        key: "start_line",
+        pattern: "stated slice with right start — push-slice pattern",
+        confidence: input.ball.start_line.confidence,
+        deviation: 1,
+        evaluation: {
+          value: null,
+          band: null,
+          inBand: null,
+          deviation: null,
+          confidence: input.ball.start_line.confidence,
+          valid: true,
+          reason: input.ball.start_line.reason,
+          status: "pass",
+        },
+        isFaultCandidate: false,
+      });
+    }
+  }
 
   for (const [key, ev] of Object.entries(readable)) {
     if (ev.status === "no-band" || ev.value === null) {

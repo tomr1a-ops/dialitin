@@ -111,6 +111,18 @@ export async function listTestSwings(): Promise<TestSwingListItem[]> {
           raw.phase_marks && typeof raw.phase_marks === "object"
             ? (raw.phase_marks as TestSwingKeypointsRow["phase_marks"])
             : null,
+        ball_labels:
+          raw.ball_labels && typeof raw.ball_labels === "object"
+            ? (raw.ball_labels as TestSwingKeypointsRow["ball_labels"])
+            : null,
+        strike_features:
+          raw.strike_features && typeof raw.strike_features === "object"
+            ? (raw.strike_features as TestSwingKeypointsRow["strike_features"])
+            : null,
+        strike_label:
+          typeof raw.strike_label === "string"
+            ? (raw.strike_label as TestSwingKeypointsRow["strike_label"])
+            : null,
       });
     }
   }

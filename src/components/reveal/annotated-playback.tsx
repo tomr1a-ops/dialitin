@@ -5,6 +5,7 @@ import { RevealScrubber } from "@/components/reveal/reveal-scrubber";
 import {
   contentRect,
   drawAddressHipReferenceLine,
+  drawBallRing,
   drawShoulderHipLines,
   drawSkeleton,
   drawTushLine,
@@ -144,6 +145,9 @@ export function AnnotatedPlayback({
     if (angle === "face_on" && addressFrame) {
       if (phases.address.valid && timeMs >= phases.address.timeMs - 50) {
         drawAddressHipReferenceLine(ctx, addressFrame, rect);
+        if (input.ballCentroid) {
+          drawBallRing(ctx, input.ballCentroid, rect);
+        }
       }
       if (phases.top.valid && timeMs >= phases.top.timeMs - 50) {
         drawShoulderHipLines(ctx, frame, rect);
@@ -172,6 +176,7 @@ export function AnnotatedPlayback({
     addressFrame,
     angle,
     handedness,
+    input.ballCentroid,
     keypoints,
     phases,
     smoothedJoints,

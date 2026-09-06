@@ -23,6 +23,8 @@ type PoseBody = {
   normalized_keypoints?: PoseFrame[] | null;
   orientation?: unknown;
   metrics?: ReturnType<typeof computeSwingMetrics>;
+  strike_features?: import("@/lib/engine/strike").StrikeFeatures | null;
+  shot_record?: import("@/lib/engine/ball").ShotRecordOutcome | null;
   handedness?: Handedness;
   club_family?: ClubFamily | null;
   intent?: ShotIntent | null;
@@ -82,6 +84,7 @@ export async function POST(
       normalized_keypoints: body.normalized_keypoints ?? null,
       orientation: body.orientation ?? null,
       metrics,
+      strike_features: body.strike_features ?? null,
     })
     .select("*")
     .single();

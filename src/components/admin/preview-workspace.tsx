@@ -119,6 +119,8 @@ export function PreviewWorkspace({
   const [markBusy, setMarkBusy] = useState(false);
   const [markMessage, setMarkMessage] = useState("");
   const [showAllLandmarks, setShowAllLandmarks] = useState(false);
+  const [ballLabelBusy, setBallLabelBusy] = useState(false);
+  const [strikeLabelBusy, setStrikeLabelBusy] = useState(false);
   const selected =
     swings.find((swing) => swing.id === selectedId) ?? swings[0] ?? null;
   const pose = selected?.keypoints ?? null;
@@ -153,6 +155,90 @@ export function PreviewWorkspace({
   const angleMismatch = labeledAngleMismatch(selected?.angle, angle);
   const lastMediaTime = keypoints.at(-1)?.mediaTime;
   const duration = lastMediaTime && lastMediaTime > 0 ? lastMediaTime : 1;
+
+  async function labelBallAtClick(event: React.MouseEvent<HTMLVideoElement>) {
+    if (!selected?.id || !videoRef.current || keypoints.length === 0) {
+      return;
+    }
+    const video = videoRef.current;
+    const rect = video.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    const frameIndex = nearestFrameIndex(keypoints, video.currentTime);
+    const size = 0.025;
+    const box = {
+      x: x * video.videoWidth - (size * video.videoWidth) / 2,
+      y: y * video.videoHeight - (size * video.videoHeight) / 2,
+      width: size * video.videoWidth,
+      height: size * video.videoHeight,
+      confidence: 1,
+    };
+    const next = {
+      ...(pose?.ball_labels ?? {}),
+      [String(frameIndex)]: box,
+    };
+    setBallLabelBusy(true);
+    try {
+      const res = await fetch(
+        `/api/admin/test-swings/${selected.id}/ball-labels`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ball_labels: next,
+            keypoint_id: pose?.id,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const json = (await res.json()) as { error?: string };
+        throw new Error(json.error ?? "Could not save ball label.");
+      }
+      setMarkMessage(`Ball box at frame ${frameIndex}.`);
+      router.refresh();
+    } catch (err) {
+      setMarkMessage(
+        err instanceof Error ? err.message : "Ball label save failed.",
+      );
+    } finally {
+      setBallLabelBusy(false);
+    }
+  }
+
+  async function saveStrikeLabel(label: string) {
+    if (!selected?.id) {
+      return;
+    }
+    setStrikeLabelBusy(true);
+    try {
+      const res = await fetch(
+        `/api/admin/test-swings/${selected.id}/strike-label`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            strike_label: label || null,
+            keypoint_id: pose?.id,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const json = (await res.json()) as { error?: string };
+        throw new Error(json.error ?? "Could not save strike label.");
+      }
+      setMarkMessage(`Strike label: ${label || "cleared"}.`);
+      router.refresh();
+    } catch (err) {
+      setMarkMessage(
+        err instanceof Error ? err.message : "Strike label save failed.",
+      );
+    } finally {
+      setStrikeLabelBusy(false);
+    }
+  }
+
+  const strikeFeatures = pose?.strike_features ?? null;
+  const strikeLabel = pose?.strike_label ?? "";
 
   async function markPhase(phase: keyof GroundTruthPhaseMarks) {
     if (!selected?.id || !videoRef.current || keypoints.length === 0) {
@@ -257,6 +343,7 @@ export function PreviewWorkspace({
                 controls
                 playsInline
                 preload="auto"
+                onClick={labelBallAtClick}
               />
             ) : (
               <p className="p-6 text-sm text-white/50">No signed clip URL.</p>
@@ -778,6 +865,66 @@ export function PreviewWorkspace({
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-[#101916] p-4">
+            <h2 className="text-lg font-semibold">Phase 2e — ball & strike</h2>
+            <p className="mt-1 text-sm text-white/55">
+              Click the video to label ball box at current frame. Strike label
+              requires capture_path + club_family on the swing row.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(["center", "heel", "toe", "thin", "fat"] as const).map(
+                (label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    disabled={strikeLabelBusy}
+                    onClick={() => void saveStrikeLabel(label)}
+                    className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                      strikeLabel === label
+                        ? "bg-[#c8f542] text-[#0b1210]"
+                        : "bg-white/10 text-white/80"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+              <button
+                type="button"
+                disabled={ballLabelBusy}
+                className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white/70"
+              >
+                {ballLabelBusy ? "Saving ball…" : "Click video → ball box"}
+              </button>
+            </div>
+            {strikeFeatures ? (
+              <div className="mt-4">
+                <p className="text-xs text-white/45">
+                  Spectrogram (64-bin mel, normalized)
+                  {strikeFeatures.reverberant ? " · reverberant" : ""}
+                </p>
+                <div className="mt-2 flex h-12 items-end gap-px">
+                  {strikeFeatures.mel_spectrogram.map((v, i) => (
+                    <div
+                      key={i}
+                      className="flex-1 bg-[#c8f542]"
+                      style={{ height: `${Math.max(4, v * 100)}%`, opacity: 0.35 + v * 0.65 }}
+                    />
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-white/50">
+                  centroid {strikeFeatures.spectral_centroid_hz.toFixed(0)} Hz ·
+                  roll-off {strikeFeatures.rolloff_85_hz.toFixed(0)} Hz · 2nd/1st{" "}
+                  {strikeFeatures.second_10ms_ratio.toFixed(2)}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-white/45">
+                No strike_features — re-run pose on test-set to capture audio.
+              </p>
+            )}
           </section>
 
           <section>

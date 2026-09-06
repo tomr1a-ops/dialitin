@@ -7,6 +7,7 @@ import type { PoseFrame } from "@/lib/pose/types";
 import { firstGuiltyMsBeforeStrike } from "@/lib/reveal/caption";
 import { isNonFaultReveal } from "@/lib/reveal/confidence-gate";
 import { formatEngineReasonForDisplay } from "@/lib/reveal/reason-display";
+import { strikeCorroborationCopy } from "@/lib/engine/strike";
 import type {
   RevealFaultKey,
   RevealInput,
@@ -52,6 +53,8 @@ export function diagnosisToRevealInput(input: {
   firstGuiltyFrameMs?: number;
   phases?: SwingPhases | null;
   keypoints?: PoseFrame[];
+  ballCentroid?: { x: number; y: number } | null;
+  strike?: import("@/lib/engine/strike").StrikeAnalysis | null;
 }): RevealInput {
   const { diagnosis, coach, voice, protocol, angle } = input;
   const metricEv = primaryMetric(diagnosis);
@@ -143,6 +146,10 @@ export function diagnosisToRevealInput(input: {
             diagnosis.first_guilty_frame,
           )
         : 0),
+    ballCentroid: input.ballCentroid ?? null,
+    strikeCorroboration: input.strike
+      ? strikeCorroborationCopy(input.strike.strike_quality)
+      : null,
   };
 
   return revealInput;
