@@ -217,7 +217,7 @@ export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {
         <h2 className="text-lg font-semibold">Upload a filming-day clip</h2>
         <p className="mt-1 text-sm text-white/55">
           Private bucket <code className="text-[#c8f542]">test-swings</code>.
-          Capture path is in-app or native Slo-mo (Rev 28 §5.3).
+          Capture path is in-app or native Slo-mo (Rev 29 §5.3).
         </p>
         <div className="mt-4">
           <input

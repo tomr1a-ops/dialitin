@@ -1,5 +1,5 @@
 -- DialItIn coaching-data schema (admin only).
--- Source of truth: docs/DialItIn_Design_Rev27.docx
+-- Source of truth: docs/DialItIn_Design_Rev29.docx
 -- Versioning: object identity is object_id; each save INSERTs a new version row.
 -- Payload columns are immutable. The only allowed UPDATE is published → draft
 -- so exactly one published version exists per object.

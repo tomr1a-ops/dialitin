@@ -20,7 +20,7 @@ const valid = {
 };
 
 describe("parseTestSwingLabels", () => {
-  test("accepts a Rev 28 filming-day row", () => {
+  test("accepts a Rev 29 filming-day row", () => {
     const result = parseTestSwingLabels(valid);
     expect(result.ok).toBe(true);
     if (result.ok) {

@@ -13,7 +13,7 @@ import {
 
 /**
  * Audio−video clock offset (ms) per capture path.
- * Rev 28 §5.2: measure on filming day with a clap-board event.
+ * Rev 29 §5.2: measure on filming day with a clap-board event.
  * native_slomo placeholder measured from G01 (IMG_8642) until filming day.
  */
 export const AV_CLOCK_OFFSET_MS = {
