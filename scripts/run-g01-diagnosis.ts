@@ -44,7 +44,7 @@ function loadEnvFile(path: string) {
   }
 }
 
-loadEnvFile(resolve(process.cwd(), ".env.local"));
+loadEnvFile(resolve(process.cwd(), ".env.development.local"));
 
 async function loadG01() {
   const swings = await listTestSwings();
