@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { jsonError, requireAdminApi } from "@/lib/admin/api";
 import { safeClipFileName, TEST_SWING_BUCKET } from "@/lib/admin/test-swings";
-import { downloadYouTubeVideo } from "@/lib/harvest/download";
+import { downloadYouTubeVideo, isYtDlpAvailable } from "@/lib/harvest/download";
 import {
   HARVEST_FETCH_RATE_LIMIT,
   HARVEST_LICENSE_NOTE,
@@ -39,6 +39,20 @@ export async function POST(request: Request) {
     body = (await request.json()) as FetchBody;
   } catch {
     return jsonError("Expected JSON body.");
+  }
+
+  if (process.env.VERCEL) {
+    return jsonError(
+      "yt-dlp cannot run on Vercel serverless. Run scripts/run-harvest.ts locally (yt-dlp installed) or point fetch at a container worker with yt-dlp.",
+      503,
+    );
+  }
+
+  if (!(await isYtDlpAvailable())) {
+    return jsonError(
+      "yt-dlp is not available on this host. Install yt-dlp or use scripts/run-harvest.ts on a machine with it.",
+      503,
+    );
   }
 
   const items = body.items ?? [];
