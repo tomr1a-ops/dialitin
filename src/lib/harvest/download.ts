@@ -35,16 +35,27 @@ export async function downloadYouTubeVideo(
   const outputTemplate = join(dir, "clip.%(ext)s");
 
   try {
+    const titleResult = await runCommand("yt-dlp", [
+      "--no-playlist",
+      "--skip-download",
+      "--print",
+      "title",
+      url,
+    ]);
+    const title =
+      titleResult.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean) ?? "harvested-clip";
+
     const result = await runCommand("yt-dlp", [
       "--no-playlist",
       "-f",
-      "bestvideo[height<=1080][fps<=60]+bestaudio/best[height<=1080]",
+      "bestvideo[height<=1080][fps<=60]+bestaudio/best[height<=1080]/best",
       "--merge-output-format",
       "mp4",
       "-o",
       outputTemplate,
-      "--print",
-      "title",
       url,
     ]);
     if (result.code !== 0) {
@@ -52,11 +63,6 @@ export async function downloadYouTubeVideo(
         result.stderr.trim() || "yt-dlp failed — install yt-dlp on the worker.",
       );
     }
-    const title =
-      result.stdout
-        .split("\n")
-        .map((line) => line.trim())
-        .find(Boolean) ?? "harvested-clip";
     const { readdir } = await import("node:fs/promises");
     const files = await readdir(dir);
     const media = files.find((name) => /\.(mp4|webm|mkv|m4v)$/i.test(name));

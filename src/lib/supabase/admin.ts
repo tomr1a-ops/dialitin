@@ -11,6 +11,22 @@ function getSecretConfig() {
   return { url, secretKey };
 }
 
+function isNewSecretKey(key: string) {
+  return key.startsWith("sb_secret_");
+}
+
+/** sb_secret keys must not be sent as Authorization Bearer (PostgREST rejects them). */
+function fetchWithoutSecretBearer(secretKey: string): typeof fetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    const auth = headers.get("Authorization");
+    if (auth?.startsWith("Bearer sb_")) {
+      headers.delete("Authorization");
+    }
+    return fetch(input, { ...init, headers });
+  };
+}
+
 export function createSecretSupabaseClient() {
   const { url, secretKey } = getSecretConfig();
 
@@ -19,6 +35,9 @@ export function createSecretSupabaseClient() {
       persistSession: false,
       autoRefreshToken: false,
     },
+    global: isNewSecretKey(secretKey)
+      ? { fetch: fetchWithoutSecretBearer(secretKey) }
+      : undefined,
   });
 }
 

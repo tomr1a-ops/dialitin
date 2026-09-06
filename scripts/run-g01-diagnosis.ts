@@ -4,7 +4,8 @@
  * 1. Empty tables → insufficient_data, no Claude call
  * 2. Seed hip_slide_down → real coach output
  */
-import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import WebSocket from "ws";
 import { listTestSwings } from "../src/lib/admin/queries";
 import { loadPublishedCoachingContent, buildCoachingContent } from "../src/lib/engine/content";
@@ -19,6 +20,31 @@ import type { StoredSwingMetrics } from "../src/lib/engine/metrics/storage";
 if (!globalThis.WebSocket) {
   globalThis.WebSocket = WebSocket as unknown as typeof WebSocket;
 }
+
+function loadEnvFile(path: string) {
+  try {
+    const raw = readFileSync(path, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
+    }
+  } catch {
+    /* optional */
+  }
+}
+
+loadEnvFile(resolve(process.cwd(), ".env.local"));
 
 async function loadG01() {
   const swings = await listTestSwings();
