@@ -1,0 +1,8 @@
+{
+  "canvasFpsDesktop": 65.6,
+  "targetFps": 30,
+  "meetsTarget": true,
+  "note": "Desktop Chromium @ ¼× playback. iPhone 12 Safari not measured in CI.",
+  "capturedAt": "2026-09-06T13:47:09.019Z",
+  "sha": "3bdb8d9"
+}
