@@ -13,7 +13,8 @@ import {
   type CoachOutput,
 } from "@/lib/coach/schema";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const DEFAULT_COACH_MODEL = "claude-haiku-4-5-20251001";
+const MODEL = process.env.COACH_MODEL?.trim() || DEFAULT_COACH_MODEL;
 const INPUT_COST_PER_M = 0.8;
 const OUTPUT_COST_PER_M = 4;
 

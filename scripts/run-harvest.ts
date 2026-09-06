@@ -1,14 +1,15 @@
 #!/usr/bin/env npx tsx
 /**
  * Phase 0a-1 automated harvest (local worker).
- * Requires: yt-dlp, dev server at --base (for MediaPipe ingest runner).
+ * Requires: yt-dlp, ffmpeg, dev server at --base (for MediaPipe ingest runner).
  *
  * Usage:
- *   npm run dev   # separate terminal
- *   npx tsx scripts/run-harvest.ts [--base http://localhost:3000] [--max-batch 10] [--seed]
+ *   npm run dev   # separate terminal (or --base https://dialitin.ai)
+ *   npx tsx --import ./scripts/ws-preload.mjs scripts/run-harvest.ts [--base URL] [--seed]
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import WebSocket from "ws";
 import { loadBandsSeedPreview, seedBandsFromReference } from "@/lib/admin/bands-seed";
@@ -19,12 +20,14 @@ import {
   type HarvestTier,
 } from "@/lib/harvest/constants";
 import { clubFamilyFromTitle, isKnownClubFamily } from "@/lib/harvest/club-family";
+import { discoverHarvestClips } from "@/lib/harvest/discover-clips";
 import { downloadYouTubeVideo, isYtDlpAvailable } from "@/lib/harvest/download";
 import { suggestedFaultFromTitle } from "@/lib/harvest/fault-keywords";
 import { runHarvestPipeline } from "@/lib/harvest/pipeline";
+import { trimVideoClip, writeTempVideo } from "@/lib/harvest/trim-clip";
 import { searchYouTubeQuery } from "@/lib/harvest/youtube-search";
 import { POSE_MODEL_VERSION } from "@/lib/pose/joints";
-import { jointCoverage, framesFromStoredKeypoints } from "@/lib/preview/coverage";
+import { jointCoverage } from "@/lib/preview/coverage";
 import { createSecretSupabaseClient } from "@/lib/supabase/admin";
 import type { Handedness } from "@/lib/admin/test-swings";
 import type { PoseFrame } from "@/lib/pose/types";
@@ -94,8 +97,9 @@ type SelectedHit = Awaited<ReturnType<typeof searchYouTubeQuery>>[number];
 type RunReport = {
   found: number;
   fetched: number;
+  clipsAfterSplit: number;
+  uploaded: number;
   passedGate: number;
-  split: number;
   fetchErrors: string[];
   pipelineErrors: string[];
   seedCells: Array<{ metricKey: string; clubFamily: string; angle: string; n: number }>;
@@ -172,9 +176,7 @@ async function runIngest(
     if (!result.ok) {
       throw new Error(result.error ?? "ingest failed");
     }
-    const frames = framesFromStoredKeypoints(
-      (result.keypoints ?? []) as PoseFrame[],
-    );
+    const frames = (result.keypoints ?? []) as PoseFrame[];
     const frameRate = Number(result.detectedFrameRate);
     if (frames.length === 0 || !Number.isFinite(frameRate) || frameRate <= 0) {
       throw new Error("ingest produced no frames");
@@ -191,7 +193,7 @@ async function savePipeline(
   frames: PoseFrame[],
   frameRate: number,
   handedness: Handedness,
-): Promise<{ passedGate: boolean; splitCount: number }> {
+): Promise<{ passedGate: boolean }> {
   const secret = createSecretSupabaseClient();
   const pipeline = runHarvestPipeline({
     swingId,
@@ -219,72 +221,7 @@ async function savePipeline(
   }
 
   await secret.from("test_swings").update(pipeline.updates).eq("id", swingId);
-
-  let splitCount = 0;
-  if (pipeline.childSegments.length > 1) {
-    for (const [index, segment] of pipeline.childSegments.entries()) {
-      const childFrames = frames.slice(
-        segment.startFrameIndex,
-        segment.endFrameIndex + 1,
-      );
-      const childPipeline = runHarvestPipeline({
-        swingId,
-        title: `${swing.golfer_label ?? "clip"} · swing ${index + 1}`,
-        tier: (swing.tier as HarvestTier | null) ?? null,
-        storagePath: String(swing.storage_path),
-        handedness,
-        frames: childFrames,
-        frameRateDetected: frameRate,
-        parentId: swingId,
-        segment,
-      });
-      const { data: child, error: childError } = await secret
-        .from("test_swings")
-        .insert({
-          storage_path: swing.storage_path,
-          parent_id: swingId,
-          created_by: ADMIN_USER_ID,
-          created_by_email: ADMIN_EMAIL,
-          source_url: swing.source_url,
-          channel: swing.channel,
-          license_note: swing.license_note,
-          tier: swing.tier,
-          golfer_label: `${swing.golfer_label ?? "clip"} · swing ${index + 1}`,
-          club_family: childPipeline.clubFamily,
-          intent: "stock",
-          capture_path: "native_slomo",
-          handedness,
-          segment_start_ms: segment.startMs,
-          segment_end_ms: segment.endMs,
-          excluded: childPipeline.excluded,
-          exclude_reason: childPipeline.excludeReason,
-          pro_label_fault_1: childPipeline.proLabelFault1,
-          label_status: childPipeline.labelStatus,
-        })
-        .select("id")
-        .single();
-      if (childError || !child) {
-        continue;
-      }
-      splitCount += 1;
-      await secret.from("test_swing_keypoints").insert({
-        test_swing_id: child.id,
-        model_version: POSE_MODEL_VERSION,
-        frame_rate_detected: frameRate,
-        keypoints: childFrames.map((frame, frameIndex) => ({
-          ...frame,
-          frameIndex,
-        })),
-        coverage: jointCoverage(childFrames),
-        phases: childPipeline.phases,
-        angle: childPipeline.angle,
-        normalized_keypoints: childPipeline.normalizedFrames,
-        metrics: childPipeline.metrics,
-      });
-    }
-  }
-
-  return { passedGate: !pipeline.excluded, splitCount };
+  return { passedGate: !pipeline.excluded };
 }
 
 async function fetchAndPipeline(
@@ -317,20 +254,30 @@ async function fetchAndPipeline(
     }
 
     for (const item of batch) {
+      let sourcePath: string | null = null;
       try {
         const { buffer, title, ext } = await downloadYouTubeVideo(item.url);
-        const fileName = safeClipFileName(
-          `${item.videoId}-${title}.${ext === "mp4" ? "mp4" : "mp4"}`,
+        sourcePath = await writeTempVideo(buffer, ext);
+        report.fetched += 1;
+
+        const ingest = await runIngest(
+          siteBase,
+          buffer.buffer.slice(
+            buffer.byteOffset,
+            buffer.byteOffset + buffer.byteLength,
+          ),
+          item.title,
         );
-        const storagePath = `harvest/${item.videoId}/${randomUUID()}-${fileName}`;
-        const { error: uploadError } = await secret.storage
-          .from(TEST_SWING_BUCKET)
-          .upload(storagePath, buffer, {
-            contentType: "video/mp4",
-            upsert: false,
-          });
-        if (uploadError) {
-          throw new Error(uploadError.message);
+
+        const clips = discoverHarvestClips(
+          ingest.keypoints,
+          ingest.frameRate,
+          "right",
+        );
+        report.clipsAfterSplit += clips.length;
+
+        if (clips.length === 0) {
+          throw new Error("no swing clips detected after pose segmentation");
         }
 
         const club = clubFamilyFromTitle(item.title);
@@ -339,57 +286,80 @@ async function fetchAndPipeline(
             ? suggestedFaultFromTitle(item.title)
             : null;
 
-        const { data: swing, error: insertError } = await secret
-          .from("test_swings")
-          .insert({
-            storage_path: storagePath,
-            created_by: ADMIN_USER_ID,
-            created_by_email: ADMIN_EMAIL,
-            source_url: item.url,
-            channel: item.channelTitle,
-            license_note: HARVEST_LICENSE_NOTE,
-            tier: item.tier,
-            golfer_label: item.title.slice(0, 80),
-            club_family: isKnownClubFamily(club) ? club : null,
-            intent: "stock",
-            capture_path: "native_slomo",
-            handedness: "right",
-            consecutive_group: null,
-            pro_label_fault_1: suggested,
-            label_status: suggested ? "suggested" : null,
-            excluded: false,
-          })
-          .select("*")
-          .single();
-        if (insertError || !swing) {
-          throw new Error(insertError?.message ?? "Insert failed.");
-        }
+        for (const clip of clips) {
+          let trimPath: string | null = null;
+          try {
+            const trimmed = await trimVideoClip(
+              sourcePath,
+              clip.startMs,
+              clip.endMs,
+            );
+            trimPath = trimmed.outputPath;
 
-        report.fetched += 1;
+            const swingLabel =
+              clips.length > 1
+                ? `${item.title.slice(0, 60)} · swing ${clip.swingIndex + 1}`
+                : item.title.slice(0, 80);
+            const fileName = safeClipFileName(
+              `${item.videoId}-swing${clip.swingIndex + 1}.mp4`,
+            );
+            const storagePath = `harvest/${item.videoId}/${randomUUID()}-${fileName}`;
 
-        const signRes = await secret.storage
-          .from(TEST_SWING_BUCKET)
-          .createSignedUrl(storagePath, 3600);
-        if (signRes.error || !signRes.data?.signedUrl) {
-          throw new Error(signRes.error?.message ?? "Could not sign clip.");
+            const { error: uploadError } = await secret.storage
+              .from(TEST_SWING_BUCKET)
+              .upload(storagePath, trimmed.buffer, {
+                contentType: "video/mp4",
+                upsert: false,
+              });
+            if (uploadError) {
+              throw new Error(uploadError.message);
+            }
+            report.uploaded += 1;
+
+            const { data: swing, error: insertError } = await secret
+              .from("test_swings")
+              .insert({
+                storage_path: storagePath,
+                created_by: ADMIN_USER_ID,
+                created_by_email: ADMIN_EMAIL,
+                source_url: item.url,
+                channel: item.channelTitle,
+                license_note: HARVEST_LICENSE_NOTE,
+                tier: item.tier,
+                golfer_label: swingLabel,
+                club_family: isKnownClubFamily(club) ? club : null,
+                intent: "stock",
+                capture_path: "native_slomo",
+                handedness: "right",
+                consecutive_group: null,
+                pro_label_fault_1: suggested,
+                label_status: suggested ? "suggested" : null,
+                excluded: false,
+                segment_start_ms: clip.startMs,
+                segment_end_ms: clip.endMs,
+              })
+              .select("*")
+              .single();
+            if (insertError || !swing) {
+              throw new Error(insertError?.message ?? "Insert failed.");
+            }
+
+            const pipeline = await savePipeline(
+              swing.id,
+              swing,
+              clip.frames,
+              clip.frameRate,
+              "right",
+            );
+            if (pipeline.passedGate) {
+              report.passedGate += 1;
+            }
+          } finally {
+            if (trimPath) {
+              await rm(trimPath, { force: true });
+            }
+          }
         }
-        const clipRes = await fetch(signRes.data.signedUrl);
-        if (!clipRes.ok) {
-          throw new Error(`clip download ${clipRes.status}`);
-        }
-        const clipBytes = await clipRes.arrayBuffer();
-        const ingest = await runIngest(siteBase, clipBytes, item.title);
-        const pipeline = await savePipeline(
-          swing.id,
-          swing,
-          ingest.keypoints,
-          ingest.frameRate,
-          "right",
-        );
-        if (pipeline.passedGate) {
-          report.passedGate += 1;
-        }
-        report.split += pipeline.splitCount;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "fetch/pipeline failed";
@@ -397,6 +367,10 @@ async function fetchAndPipeline(
           report.fetchErrors.push(`${item.videoId}: ${message}`);
         } else {
           report.pipelineErrors.push(`${item.videoId}: ${message}`);
+        }
+      } finally {
+        if (sourcePath) {
+          await rm(sourcePath, { force: true });
         }
       }
     }
@@ -423,8 +397,9 @@ async function main() {
   const report: RunReport = {
     found: 0,
     fetched: 0,
+    clipsAfterSplit: 0,
+    uploaded: 0,
     passedGate: 0,
-    split: 0,
     fetchErrors: [],
     pipelineErrors: [],
     seedCells: [],
