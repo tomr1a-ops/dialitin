@@ -1,17 +1,21 @@
-import {
-  LEFT_HIP,
-  LEFT_WRIST,
-  RIGHT_HIP,
-  RIGHT_WRIST,
-  type PoseFrame,
-} from "@/lib/pose/types";
 import type { LeadWristReconstruction } from "@/lib/engine/occlusion";
 import type { SwingPhases } from "@/lib/engine/phases";
 import {
-  normToCanvas,
   REVEAL_COLORS,
   type ContentRect,
 } from "@/lib/reveal/canvas-utils";
+import {
+  buildPelvisTrace,
+  buildWristTrace,
+  leadWristIndex,
+  traceToCanvas,
+  type TraceCanvasPoint,
+} from "@/lib/reveal/trace-path";
+import type { PoseFrame } from "@/lib/pose/types";
+
+const TRACE_LINE_WIDTH = 2;
+const PELVIS_LINE_WIDTH = 1.5;
+const TRACE_OPACITY = 0.6;
 
 export const TracesOverlay = {
   draw(
@@ -23,18 +27,10 @@ export const TracesOverlay = {
       wristReconstruction: LeadWristReconstruction | null;
       currentTime: number;
       rect: ContentRect;
-      frame: PoseFrame;
     },
   ) {
-    const {
-      keypoints,
-      phases,
-      handedness,
-      wristReconstruction,
-      currentTime,
-      rect,
-      frame,
-    } = options;
+    const { keypoints, phases, handedness, wristReconstruction, currentTime, rect } =
+      options;
 
     const topIdx = phases.top.valid ? phases.top.frameIndex : null;
     const impactIdx = phases.impact.valid ? phases.impact.frameIndex : null;
@@ -42,163 +38,97 @@ export const TracesOverlay = {
       return;
     }
 
-    const leadWrist = handedness === "right" ? LEFT_WRIST : RIGHT_WRIST;
+    const addressIdx = phases.address.valid ? phases.address.frameIndex : 0;
     const currentIdx = keypoints.findIndex(
       (kp) => Math.abs(kp.mediaTime - currentTime) < 0.02,
     );
     const endIdx = currentIdx >= 0 ? currentIdx : keypoints.length - 1;
+    const clipEnd = Math.min(endIdx, impactIdx);
+    const leadWrist = leadWristIndex(handedness);
 
-    drawHandPath(ctx, {
-      keypoints,
-      wristReconstruction,
+    const backswingImage = buildWristTrace(keypoints, {
       leadWrist,
-      addressIdx: phases.address.valid ? phases.address.frameIndex : 0,
-      topIdx,
-      impactIdx: Math.min(endIdx, impactIdx),
-      rect,
-      frame,
+      startIdx: addressIdx,
+      endIdx: Math.min(topIdx, clipEnd),
+      wristReconstruction,
     });
+    const downswingImage = buildWristTrace(keypoints, {
+      leadWrist,
+      startIdx: topIdx,
+      endIdx: clipEnd,
+      wristReconstruction,
+    });
+    const pelvisImage = buildPelvisTrace(keypoints, addressIdx, clipEnd);
 
-    drawPelvisTrace(ctx, {
-      keypoints,
-      startIdx: phases.address.valid ? phases.address.frameIndex : 0,
-      endIdx: Math.min(endIdx, impactIdx),
-      rect,
-      frame,
+    drawTraceSegment(ctx, traceToCanvas(backswingImage, rect), {
+      color: REVEAL_COLORS.backswing,
+      lineWidth: TRACE_LINE_WIDTH,
+    });
+    drawTraceSegment(ctx, traceToCanvas(downswingImage, rect), {
+      color: REVEAL_COLORS.downswing,
+      lineWidth: TRACE_LINE_WIDTH,
+    });
+    drawTraceSegment(ctx, traceToCanvas(pelvisImage, rect), {
+      color: REVEAL_COLORS.pelvis,
+      lineWidth: PELVIS_LINE_WIDTH,
     });
   },
 };
 
-function drawHandPath(
+function drawTraceSegment(
   ctx: CanvasRenderingContext2D,
-  options: {
-    keypoints: PoseFrame[];
-    wristReconstruction: LeadWristReconstruction | null;
-    leadWrist: number;
-    addressIdx: number;
-    topIdx: number;
-    impactIdx: number;
-    rect: ContentRect;
-    frame: PoseFrame;
-  },
+  points: (TraceCanvasPoint | null)[],
+  options: { color: string; lineWidth: number },
 ) {
-  const {
-    keypoints,
-    wristReconstruction,
-    leadWrist,
-    addressIdx,
-    topIdx,
-    impactIdx,
-    rect,
-    frame,
-  } = options;
-
   ctx.save();
-  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = options.color;
+  ctx.lineWidth = options.lineWidth;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = TRACE_OPACITY;
 
-  // Backswing trace
-  ctx.strokeStyle = REVEAL_COLORS.backswing;
-  ctx.beginPath();
   let started = false;
-  for (let i = addressIdx; i <= Math.min(topIdx, impactIdx); i++) {
-    const pt = wristPoint(keypoints, wristReconstruction, leadWrist, i, frame, rect);
-    if (!pt) {
-      continue;
-    }
-    if (!started) {
-      ctx.moveTo(pt.x, pt.y);
-      started = true;
-    } else {
-      ctx.setLineDash(pt.dashed ? [6, 4] : []);
-      ctx.lineTo(pt.x, pt.y);
-    }
-  }
-  ctx.stroke();
+  let last: TraceCanvasPoint | null = null;
 
-  // Downswing trace
-  ctx.strokeStyle = REVEAL_COLORS.downswing;
-  ctx.beginPath();
-  started = false;
-  for (let i = topIdx; i <= impactIdx; i++) {
-    const pt = wristPoint(keypoints, wristReconstruction, leadWrist, i, frame, rect);
-    if (!pt) {
-      continue;
+  const flush = () => {
+    if (started) {
+      ctx.stroke();
     }
-    if (!started) {
-      ctx.moveTo(pt.x, pt.y);
-      started = true;
-    } else {
-      ctx.setLineDash(pt.dashed ? [6, 4] : []);
-      ctx.lineTo(pt.x, pt.y);
-    }
-  }
-  ctx.stroke();
-  ctx.restore();
-}
+    started = false;
+  };
 
-function wristPoint(
-  keypoints: PoseFrame[],
-  wristReconstruction: LeadWristReconstruction | null,
-  leadWrist: number,
-  frameIndex: number,
-  displayFrame: PoseFrame,
-  rect: ContentRect,
-): { x: number; y: number; dashed: boolean } | null {
-  const recon = wristReconstruction?.frames[frameIndex];
-  if (recon?.valid) {
-    const c = normToCanvas(recon.x, recon.y, displayFrame, rect);
-    return { x: c.x, y: c.y, dashed: recon.reason !== "visible" };
-  }
-  const kp = keypoints[frameIndex];
-  if (!kp) {
-    return null;
-  }
-  const point = kp.landmarks[leadWrist];
-  if (!point || point.visibility < 0.2) {
-    return null;
-  }
-  const c = normToCanvas(point.x, point.y, displayFrame, rect);
-  return { x: c.x, y: c.y, dashed: false };
-}
+  for (const point of points) {
+    if (!point) {
+      flush();
+      last = null;
+      continue;
+    }
 
-function drawPelvisTrace(
-  ctx: CanvasRenderingContext2D,
-  options: {
-    keypoints: PoseFrame[];
-    startIdx: number;
-    endIdx: number;
-    rect: ContentRect;
-    frame: PoseFrame;
-  },
-) {
-  const { keypoints, startIdx, endIdx, rect, frame } = options;
-  ctx.save();
-  ctx.strokeStyle = REVEAL_COLORS.pelvis;
-  ctx.lineWidth = 2;
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  let started = false;
-  for (let i = startIdx; i <= endIdx; i++) {
-    const kp = keypoints[i];
-    if (!kp) {
-      continue;
-    }
-    const lh = kp.landmarks[LEFT_HIP];
-    const rh = kp.landmarks[RIGHT_HIP];
-    if (!lh || !rh || lh.visibility < 0.2 || rh.visibility < 0.2) {
-      continue;
-    }
-    const cx = (lh.x + rh.x) / 2;
-    const cy = (lh.y + rh.y) / 2;
-    const c = normToCanvas(cx, cy, frame, rect);
     if (!started) {
-      ctx.moveTo(c.x, c.y);
+      ctx.beginPath();
+      ctx.setLineDash(point.dashed ? [6, 4] : []);
+      ctx.moveTo(point.x, point.y);
       started = true;
-    } else {
-      ctx.lineTo(c.x, c.y);
+      last = point;
+      continue;
     }
+
+    if (point.dashed !== last!.dashed) {
+      flush();
+      ctx.beginPath();
+      ctx.setLineDash(point.dashed ? [6, 4] : []);
+      ctx.moveTo(last!.x, last!.y);
+      ctx.lineTo(point.x, point.y);
+      started = true;
+      last = point;
+      continue;
+    }
+
+    ctx.setLineDash(point.dashed ? [6, 4] : []);
+    ctx.lineTo(point.x, point.y);
+    last = point;
   }
-  ctx.stroke();
+
+  flush();
   ctx.restore();
 }

@@ -124,6 +124,7 @@ export function RevealFlow({
           keypoints={session.keypoints}
           frameIndex={impactFrameIndex}
           handedness={session.handedness}
+          angle={session.angle}
           input={input}
         />
       ) : null}
@@ -149,6 +150,7 @@ export function RevealFlow({
           keypoints={session.keypoints}
           frameIndex={impactFrameIndex}
           handedness={session.handedness}
+          angle={session.angle}
           input={input}
           showRetestDelta={Boolean(session.retestVideoSrc)}
         />
@@ -246,6 +248,6 @@ export function buildRevealSessionFromCapture(
     phases,
     handedness: options.handedness ?? "right",
     angle: options.angle ?? "dtl",
-    input: options.input ?? createPlaceholderRevealInput(),
+    input: options.input ?? createPlaceholderRevealInput(options.angle ?? "dtl"),
   };
 }

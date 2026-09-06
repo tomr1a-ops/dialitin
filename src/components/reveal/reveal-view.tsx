@@ -100,7 +100,7 @@ export function RevealView() {
       {
         handedness: "right",
         angle,
-        input: createPlaceholderRevealInput(),
+        input: createPlaceholderRevealInput(angle),
       },
     );
   }, [result, session]);

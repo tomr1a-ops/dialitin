@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   contentRect,
+  drawAddressHipReferenceLine,
   drawSkeleton,
   drawTushLine,
   pelvisCenter,
@@ -21,6 +22,7 @@ export function FixReceipt({
   keypoints,
   frameIndex,
   handedness,
+  angle,
   input,
   showRetestDelta = false,
   onPngReady,
@@ -29,6 +31,7 @@ export function FixReceipt({
   keypoints: PoseFrame[];
   frameIndex: number;
   handedness: "left" | "right";
+  angle: "dtl" | "face_on";
   input: RevealInput;
   showRetestDelta?: boolean;
   onPngReady?: (dataUrl: string) => void;
@@ -65,8 +68,11 @@ export function FixReceipt({
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const rect = contentRect(video);
         drawSkeleton(ctx, frame, rect);
-        if (tushLineX != null) {
-          drawTushLine(ctx, frame, rect, tushLineX);
+        if (angle === "dtl" && tushLineX != null) {
+          drawTushLine(ctx, addressFrame, rect, tushLineX);
+        }
+        if (angle === "face_on") {
+          drawAddressHipReferenceLine(ctx, addressFrame, rect);
         }
         const pelvis = pelvisCenter(frame, rect);
         if (pelvis) {
@@ -81,7 +87,16 @@ export function FixReceipt({
     raf = window.requestAnimationFrame(tick);
 
     const exportTimer = window.setTimeout(() => {
-      renderReceiptPng(exportCanvas, video, frame, handedness, input, showRetestDelta);
+      renderReceiptPng(
+        exportCanvas,
+        video,
+        frame,
+        addressFrame,
+        handedness,
+        angle,
+        input,
+        showRetestDelta,
+      );
       const dataUrl = exportCanvas.toDataURL("image/png");
       onPngReady?.(dataUrl);
     }, 600);
@@ -90,7 +105,7 @@ export function FixReceipt({
       window.cancelAnimationFrame(raf);
       window.clearTimeout(exportTimer);
     };
-  }, [frame, handedness, input, onPngReady, showRetestDelta, tushLineX, videoSrc]);
+  }, [addressFrame, angle, frame, handedness, input, onPngReady, showRetestDelta, tushLineX, videoSrc]);
 
   return (
     <section data-testid="reveal-fix-receipt">
@@ -168,7 +183,9 @@ function renderReceiptPng(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
   frame: PoseFrame,
+  addressFrame: PoseFrame,
   handedness: "left" | "right",
+  angle: "dtl" | "face_on",
   input: RevealInput,
   showRetestDelta: boolean,
 ) {
@@ -190,11 +207,13 @@ function renderReceiptPng(
     videoWidth: video.videoWidth,
     videoHeight: video.videoHeight,
   };
-  const addressFrame = frame;
   const tushLineX = tushLineXAtAddress(addressFrame, handedness);
   drawSkeleton(ctx, frame, rect, { opacity: 0.9 });
-  if (tushLineX != null) {
-    drawTushLine(ctx, frame, rect, tushLineX);
+  if (angle === "dtl" && tushLineX != null) {
+    drawTushLine(ctx, addressFrame, rect, tushLineX);
+  }
+  if (angle === "face_on") {
+    drawAddressHipReferenceLine(ctx, addressFrame, rect);
   }
   const pelvis = pelvisCenter(frame, rect);
   if (pelvis) {

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   contentRect,
+  drawAddressHipReferenceLine,
   drawSkeleton,
   drawTushLine,
   pelvisCenter,
@@ -20,12 +21,14 @@ export function TargetPosition({
   keypoints,
   frameIndex,
   handedness,
+  angle,
   input,
 }: {
   still: string;
   keypoints: PoseFrame[];
   frameIndex: number;
   handedness: "left" | "right";
+  angle: "dtl" | "face_on";
   input: RevealInput;
 }) {
   const actualVideoRef = useRef<HTMLVideoElement>(null);
@@ -73,8 +76,11 @@ export function TargetPosition({
           color: target ? REVEAL_COLORS.target : REVEAL_COLORS.skeleton,
         });
 
-        if (tushLineX != null) {
-          drawTushLine(ctx, drawFrame, rect, tushLineX);
+        if (angle === "dtl" && tushLineX != null) {
+          drawTushLine(ctx, addressFrame, rect, tushLineX);
+        }
+        if (angle === "face_on") {
+          drawAddressHipReferenceLine(ctx, addressFrame, rect);
         }
 
         if (!target) {
@@ -91,7 +97,7 @@ export function TargetPosition({
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [addressFrame, frame, input.targetPosition, tushLineX, videoSrc]);
+  }, [addressFrame, angle, frame, input.targetPosition, tushLineX, videoSrc]);
 
   return (
     <section data-testid="reveal-target-position">

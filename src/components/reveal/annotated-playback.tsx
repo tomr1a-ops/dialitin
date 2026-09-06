@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RevealScrubber } from "@/components/reveal/reveal-scrubber";
 import {
   contentRect,
+  drawAddressHipReferenceLine,
   drawShoulderHipLines,
   drawSkeleton,
   drawTushLine,
   pelvisCenter,
   resizeCanvasToVideo,
   tushLineXAtAddress,
+  REVEAL_COLORS,
 } from "@/lib/reveal/canvas-utils";
 import type { RevealInput } from "@/lib/reveal/types";
 import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
@@ -72,15 +74,12 @@ export function AnnotatedPlayback({
   const guiltyTimeSec =
     windowStart + input.firstGuiltyFrameMs / 1000;
 
-  const wristReconstruction =
-    angle === "dtl"
-      ? reconstructLeadWristPath({
-          frames: keypoints,
-          phases,
-          handedness,
-          capturePath,
-        })
-      : null;
+  const wristReconstruction = reconstructLeadWristPath({
+    frames: keypoints,
+    phases,
+    handedness,
+    capturePath,
+  });
 
   const setPhase = useCallback((phase: PlaybackPhase) => {
     playbackPhaseRef.current = phase;
@@ -105,15 +104,15 @@ export function AnnotatedPlayback({
 
     drawSkeleton(ctx, frame, rect, { opacity: 0.85 });
 
-    if (angle === "dtl" && tushLineX != null) {
+    if (angle === "dtl" && tushLineX != null && addressFrame) {
       if (phases.address.valid && timeMs >= phases.address.timeMs - 50) {
-        drawTushLine(ctx, frame, rect, tushLineX);
+        drawTushLine(ctx, addressFrame, rect, tushLineX);
       }
       if (phases.impact.valid && timeMs >= phases.impact.timeMs - 30) {
-        drawTushLine(ctx, frame, rect, tushLineX);
+        drawTushLine(ctx, addressFrame, rect, tushLineX);
         const pelvis = pelvisCenter(frame, rect);
         if (pelvis) {
-          ctx.fillStyle = "#ff6b6b";
+          ctx.fillStyle = REVEAL_COLORS.fault;
           ctx.beginPath();
           ctx.arc(pelvis.x, pelvis.y, 8, 0, Math.PI * 2);
           ctx.fill();
@@ -121,8 +120,23 @@ export function AnnotatedPlayback({
       }
     }
 
-    if (angle === "face_on" && phases.top.valid && timeMs >= phases.top.timeMs - 50) {
-      drawShoulderHipLines(ctx, frame, rect);
+    if (angle === "face_on" && addressFrame) {
+      if (phases.address.valid && timeMs >= phases.address.timeMs - 50) {
+        drawAddressHipReferenceLine(ctx, addressFrame, rect);
+      }
+      if (phases.top.valid && timeMs >= phases.top.timeMs - 50) {
+        drawShoulderHipLines(ctx, frame, rect);
+      }
+      if (phases.impact.valid && timeMs >= phases.impact.timeMs - 30) {
+        drawAddressHipReferenceLine(ctx, addressFrame, rect);
+        const pelvis = pelvisCenter(frame, rect);
+        if (pelvis) {
+          ctx.fillStyle = REVEAL_COLORS.fault;
+          ctx.beginPath();
+          ctx.arc(pelvis.x, pelvis.y, 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
 
     TracesOverlay.draw(ctx, {
@@ -132,9 +146,8 @@ export function AnnotatedPlayback({
       wristReconstruction,
       currentTime: video.currentTime,
       rect,
-      frame,
     });
-  }, [angle, handedness, keypoints, phases, tushLineX, wristReconstruction]);
+  }, [addressFrame, angle, handedness, keypoints, phases, tushLineX, wristReconstruction]);
 
   const resumeFromHold = useCallback(async () => {
     const video = videoRef.current;

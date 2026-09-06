@@ -65,10 +65,11 @@ export function toCanvasPoint(
   };
 }
 
-export function normToCanvas(
+/** Map crop-normalized landmark coords through the frame's own crop → canvas. */
+export function landmarkToCanvas(
+  frame: PoseFrame,
   x: number,
   y: number,
-  frame: PoseFrame,
   rect: ContentRect,
 ) {
   const fullX = frame.crop.x + x * frame.crop.width;
@@ -77,6 +78,16 @@ export function normToCanvas(
     x: rect.x + (fullX / rect.videoWidth) * rect.width,
     y: rect.y + (fullY / rect.videoHeight) * rect.height,
   };
+}
+
+/** @deprecated Use landmarkToCanvas — same math, name clarifies per-frame crop. */
+export function normToCanvas(
+  x: number,
+  y: number,
+  frame: PoseFrame,
+  rect: ContentRect,
+) {
+  return landmarkToCanvas(frame, x, y, rect);
 }
 
 export function drawSkeleton(
@@ -149,16 +160,46 @@ export function pelvisCenter(frame: PoseFrame, rect: ContentRect) {
 
 export function drawTushLine(
   ctx: CanvasRenderingContext2D,
-  frame: PoseFrame,
+  addressFrame: PoseFrame,
   rect: ContentRect,
   tushLineX: number,
   color = REVEAL_COLORS.tushLine,
 ) {
-  const top = normToCanvas(tushLineX, 0.05, frame, rect);
-  const bottom = normToCanvas(tushLineX, 0.95, frame, rect);
+  const top = landmarkToCanvas(addressFrame, tushLineX, 0.05, rect);
+  const bottom = landmarkToCanvas(addressFrame, tushLineX, 0.95, rect);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.6;
+  ctx.lineCap = "round";
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(top.x, top.y);
+  ctx.lineTo(bottom.x, bottom.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Face-on address hip-center vertical reference for hip slide faults. */
+export function drawAddressHipReferenceLine(
+  ctx: CanvasRenderingContext2D,
+  addressFrame: PoseFrame,
+  rect: ContentRect,
+  color = REVEAL_COLORS.tushLine,
+) {
+  const lh = addressFrame.landmarks[LEFT_HIP];
+  const rh = addressFrame.landmarks[RIGHT_HIP];
+  if (!lh || !rh || lh.visibility < 0.35 || rh.visibility < 0.35) {
+    return;
+  }
+  const hipCenterX = (lh.x + rh.x) / 2;
+  const top = landmarkToCanvas(addressFrame, hipCenterX, 0.05, rect);
+  const bottom = landmarkToCanvas(addressFrame, hipCenterX, 0.95, rect);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.6;
+  ctx.lineCap = "round";
   ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(top.x, top.y);

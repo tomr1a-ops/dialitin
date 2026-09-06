@@ -2,12 +2,12 @@ import type { SwingPhases } from "@/lib/engine/phases";
 import type { Handedness } from "@/lib/admin/test-swings";
 import type { PoseFrame } from "@/lib/pose/types";
 
-export type RevealFaultKey = "early_extension";
+export type RevealFaultKey = "early_extension" | "hip_slide_down";
 
 export type RevealJointFamily = "pelvis" | "head" | "hands";
 
 export type RevealMetric = {
-  key: "tush_line_pelvis";
+  key: "tush_line_pelvis" | "hip_slide_down";
   label: string;
   /** Normalized: % of stance width — never inches or degrees. */
   value: number;
