@@ -6,6 +6,11 @@ import { evaluateSwingMetrics } from "@/lib/engine/evaluate";
 import type { StoredSwingMetrics } from "@/lib/engine/metrics/storage";
 import type { SkillLevel } from "@/lib/engine/bands";
 import type { SwingPhases } from "@/lib/engine/phases";
+import {
+  baselineSnapshotFromSwingMetrics,
+  whatChangedSinceDisplay,
+} from "@/lib/reveal/baseline-comparison";
+import type { WhatChangedSinceDisplay } from "@/lib/reveal/types";
 import { createSecretSupabaseClient } from "@/lib/supabase/admin";
 
 export type RunDiagnosisInput = {
@@ -38,20 +43,87 @@ export type RunDiagnosisResult = {
   coachOutput: Awaited<ReturnType<typeof explainDiagnosis>> | null;
   swingId: string | null;
   diagnosisId: string | null;
+  whatChangedSince?: WhatChangedSinceDisplay;
+  isFirstResult: boolean;
 };
+
+async function resolveIsFirstResult(golferId: string | undefined): Promise<boolean> {
+  if (!golferId) {
+    return true;
+  }
+  const secret = createSecretSupabaseClient();
+  const { count } = await secret
+    .from("swings")
+    .select("id", { count: "exact", head: true })
+    .eq("golfer_id", golferId);
+  return (count ?? 0) === 0;
+}
+
+async function loadBaselineForComparison(input: {
+  golferId: string;
+  clubFamily: ClubFamily;
+  angle: "dtl" | "face_on";
+  intent: ShotIntent;
+  level: SkillLevel;
+  bands: Awaited<ReturnType<typeof loadPublishedCoachingContent>>["bands"];
+}) {
+  const secret = createSecretSupabaseClient();
+  const { data: baselineRow } = await secret
+    .from("baselines")
+    .select("swing_id, saved_at, club_family, angle, intent")
+    .eq("golfer_id", input.golferId)
+    .eq("club_family", input.clubFamily)
+    .eq("angle", input.angle)
+    .eq("intent", input.intent)
+    .maybeSingle();
+
+  if (!baselineRow?.swing_id) {
+    return null;
+  }
+
+  const { data: swing } = await secret
+    .from("swings")
+    .select("metrics")
+    .eq("id", baselineRow.swing_id)
+    .maybeSingle();
+
+  if (!swing?.metrics) {
+    return null;
+  }
+
+  const baselineEvaluations = evaluateSwingMetrics({
+    metrics: swing.metrics as StoredSwingMetrics,
+    classification: input.angle,
+    level: input.level,
+    clubFamily: input.clubFamily,
+    intent: input.intent,
+    bands: input.bands,
+  });
+
+  return baselineSnapshotFromSwingMetrics({
+    evaluations: baselineEvaluations,
+    clubFamily: baselineRow.club_family as string,
+    angle: baselineRow.angle as string,
+    intent: baselineRow.intent as string,
+    savedAt: baselineRow.saved_at as string,
+  });
+}
 
 export async function runDiagnosisPipeline(
   input: RunDiagnosisInput,
 ): Promise<RunDiagnosisResult> {
   const content = await loadPublishedCoachingContent(input.contentVersionId);
   const level = input.level ?? "intermediate";
+  const intent = input.intent ?? "stock";
+  const isFirstResult =
+    input.isFirstResult ?? (await resolveIsFirstResult(input.golferId));
 
   const evaluations = evaluateSwingMetrics({
     metrics: input.metrics,
     classification: input.angle,
     level,
     clubFamily: input.clubFamily,
-    intent: input.intent,
+    intent,
     bands: content.bands,
   });
 
@@ -60,7 +132,7 @@ export async function runDiagnosisPipeline(
     phases: input.phases,
     angle: input.angle,
     clubFamily: input.clubFamily,
-    intent: input.intent,
+    intent,
     handedness: input.handedness,
     level,
     statedSymptom: input.statedSymptom,
@@ -73,6 +145,7 @@ export async function runDiagnosisPipeline(
 
   let swingId: string | null = null;
   let diagnosisId: string | null = null;
+  let coachOutput: Awaited<ReturnType<typeof explainDiagnosis>> | null = null;
 
   if (input.persist !== false && input.golferId) {
     const secret = createSecretSupabaseClient();
@@ -87,7 +160,7 @@ export async function runDiagnosisPipeline(
         content_version_id: content.contentVersionId,
         capture_path: input.capturePath ?? "upload",
         club_family: input.clubFamily,
-        intent: input.intent ?? "stock",
+        intent,
         handedness: input.handedness,
         level,
         stated_symptom: input.statedSymptom ?? null,
@@ -98,24 +171,9 @@ export async function runDiagnosisPipeline(
     if (!swingError && swing) {
       swingId = swing.id as string;
     }
-  }
 
-  let coachOutput: Awaited<ReturnType<typeof explainDiagnosis>> | null = null;
-
-  if (input.callCoach !== false && diagnosis.outcome === "fault") {
-    coachOutput = await explainDiagnosis({
-      diagnosis,
-      content,
-      level,
-      symptom: input.statedSymptom,
-      isFirstResult: input.isFirstResult,
-      diagnosisId,
-      persist: input.persist,
-    });
-
-    if (input.persist !== false && swingId) {
-      const secret = createSecretSupabaseClient();
-      const { data: dx, error } = await secret
+    if (swingId) {
+      const { data: dx } = await secret
         .from("diagnoses")
         .insert({
           swing_id: swingId,
@@ -126,7 +184,7 @@ export async function runDiagnosisPipeline(
           evidence: diagnosis.evidence,
           protocol_id: diagnosis.protocol_id,
           mode: diagnosis.mode,
-          coach_output: coachOutput.output,
+          coach_output: null,
           score_internal: diagnosis.score_internal,
           reasons: diagnosis.reasons,
           first_guilty_frame: diagnosis.first_guilty_frame,
@@ -134,32 +192,48 @@ export async function runDiagnosisPipeline(
         })
         .select("id")
         .single();
-      if (!error && dx) {
-        diagnosisId = dx.id as string;
-      }
+      diagnosisId = (dx?.id as string) ?? null;
     }
-  } else if (input.persist !== false && swingId) {
-    const secret = createSecretSupabaseClient();
-    const { data: dx } = await secret
-      .from("diagnoses")
-      .insert({
-        swing_id: swingId,
-        outcome: diagnosis.outcome,
-        headline_fault: diagnosis.headline_fault,
-        fault_key: diagnosis.fault_key,
-        family: diagnosis.family,
-        evidence: diagnosis.evidence,
-        protocol_id: diagnosis.protocol_id,
-        mode: diagnosis.mode,
-        coach_output: null,
-        score_internal: diagnosis.score_internal,
-        reasons: diagnosis.reasons,
-        first_guilty_frame: diagnosis.first_guilty_frame,
-        delta_pct_stance: diagnosis.delta_pct_stance,
-      })
-      .select("id")
-      .single();
-    diagnosisId = (dx?.id as string) ?? null;
+  }
+
+  if (input.callCoach !== false && diagnosis.outcome === "fault") {
+    coachOutput = await explainDiagnosis({
+      diagnosis,
+      content,
+      level,
+      symptom: input.statedSymptom,
+      isFirstResult,
+      diagnosisId,
+      persist: input.persist,
+    });
+
+    if (input.persist !== false && diagnosisId && coachOutput.output) {
+      const secret = createSecretSupabaseClient();
+      await secret
+        .from("diagnoses")
+        .update({ coach_output: coachOutput.output })
+        .eq("id", diagnosisId);
+    }
+  }
+
+  let whatChangedSince: WhatChangedSinceDisplay | undefined;
+  if (input.golferId) {
+    const baseline = await loadBaselineForComparison({
+      golferId: input.golferId,
+      clubFamily: input.clubFamily,
+      angle: input.angle,
+      intent,
+      level,
+      bands: content.bands,
+    });
+    whatChangedSince = whatChangedSinceDisplay({
+      evaluations,
+      baseline,
+      angle: input.angle,
+      clubFamily: input.clubFamily,
+      intent,
+      diagnosisOrder: diagnosis.evidence.map((e) => e.metric),
+    });
   }
 
   return {
@@ -169,5 +243,7 @@ export async function runDiagnosisPipeline(
     coachOutput,
     swingId,
     diagnosisId,
+    whatChangedSince,
+    isFirstResult,
   };
 }

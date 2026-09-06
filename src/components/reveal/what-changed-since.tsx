@@ -2,7 +2,7 @@
 
 import type { WhatChangedSinceDisplay } from "@/lib/reveal/types";
 
-/** Display-only What Changed Since? (Section 6.13) — no engine diff in Phase 2b. */
+/** Real baseline comparison from baselines table (Section 6.13). */
 export function WhatChangedSince({
   display,
 }: {

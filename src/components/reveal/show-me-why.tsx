@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { guiltyTimingReliabilityNote } from "@/lib/reveal/caption";
+import {
+  assertRevealInputConfidence,
+  metricEligibleForReveal,
+} from "@/lib/reveal/confidence-gate";
+import { formatEngineReasonForDisplay } from "@/lib/reveal/reason-display";
 import type { SwingPhases } from "@/lib/engine/phases";
 import type { RevealInput } from "@/lib/reveal/types";
 
@@ -30,8 +35,11 @@ export function ShowMeWhy({
   }
 
   const { metric } = input;
+  assertRevealInputConfidence(input);
+  const showMetric = metricEligibleForReveal(input);
   const confidencePct = Math.round(metric.confidence * 100);
   const timingReliabilityNote = phases ? guiltyTimingReliabilityNote(phases) : null;
+  const reasonText = formatEngineReasonForDisplay(metric.reason);
 
   return (
     <section data-testid="reveal-show-me-why">
@@ -61,6 +69,7 @@ export function ShowMeWhy({
       </div>
 
       {mode === "show" ? (
+        showMetric ? (
         <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
           <p className="text-sm font-semibold text-[#f3c36a]">
             {metric.label}
@@ -80,7 +89,12 @@ export function ShowMeWhy({
             </p>
           ) : null}
         </div>
-      ) : (
+        ) : (
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+            {timingReliabilityNote ?? reasonText ?? input.feelSentence}
+          </div>
+        )
+      ) : showMetric ? (
         <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-relaxed text-white/80">
           <p>
             <span className="font-semibold text-white">Measured:</span>{" "}
@@ -89,7 +103,7 @@ export function ShowMeWhy({
           </p>
           <p>
             <span className="font-semibold text-white">Confidence:</span>{" "}
-            {confidencePct}%. {metric.reason}
+            {confidencePct}%. {reasonText}
           </p>
           {timingReliabilityNote ? (
             <p>
@@ -100,7 +114,7 @@ export function ShowMeWhy({
           {traceLowConfidence ? (
             <p>
               <span className="font-semibold text-white">Hand path:</span> low
-              confidence — too many frames were occluded or rejected for a
+              confidence. Too many frames were occluded or rejected for a
               reliable trace.
             </p>
           ) : null}
@@ -108,6 +122,10 @@ export function ShowMeWhy({
             We measure you, not the stick. That&apos;s why this isn&apos;t
             guessing.
           </p>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-relaxed text-white/80">
+          <p>{input.feelSentence || reasonText}</p>
         </div>
       )}
     </section>

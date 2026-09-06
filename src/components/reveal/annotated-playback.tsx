@@ -405,7 +405,9 @@ export function AnnotatedPlayback({
         windowEnd={windowEnd}
         currentTime={scrubTime}
         phases={phases}
+        keypoints={keypoints}
         guiltyTimeSec={guiltyTimeSec}
+        timingUnreliable={guiltyTimingInvalid}
         onSeek={seek}
       />
     </section>

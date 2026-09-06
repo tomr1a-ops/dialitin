@@ -13,6 +13,7 @@ import {
   REVEAL_COLORS,
 } from "@/lib/reveal/canvas-utils";
 import type { RevealInput } from "@/lib/reveal/types";
+import { metricEligibleForReveal } from "@/lib/reveal/confidence-gate";
 import type { PoseFrame } from "@/lib/pose/types";
 
 const RECEIPT_WIDTH = 390;
@@ -157,12 +158,15 @@ function ReceiptCardPreview({
   input: RevealInput;
   showRetestDelta: boolean;
 }) {
+  const showMetric = metricEligibleForReveal(input);
   return (
     <div className="mt-4 rounded-2xl border border-white/10 bg-[#0f1612] p-4">
       <p className="text-sm leading-relaxed text-white/85">{input.feelSentence}</p>
-      <p className="mt-3 text-lg font-semibold text-[#f3c36a]">
-        {input.metric.label}: {input.metric.value.toFixed(0)}% of stance width
-      </p>
+      {showMetric ? (
+        <p className="mt-3 text-lg font-semibold text-[#f3c36a]">
+          {input.metric.label}: {input.metric.value.toFixed(0)}% of stance width
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-white/70">
         {input.drillName} · {input.drillDurationSec}s
       </p>

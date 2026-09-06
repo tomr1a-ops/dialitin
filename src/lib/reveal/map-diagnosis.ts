@@ -1,9 +1,12 @@
 import type { CoachOutput } from "@/lib/coach/schema";
 import type { DiagnosisResult } from "@/lib/engine/diagnose";
+import { METRIC_READ_CONFIDENCE_THRESHOLD } from "@/lib/engine/evaluate";
 import type { ProtocolEntry, VoiceEntry } from "@/lib/engine/content";
 import type { SwingPhases } from "@/lib/engine/phases";
 import type { PoseFrame } from "@/lib/pose/types";
 import { firstGuiltyMsBeforeStrike } from "@/lib/reveal/caption";
+import { isNonFaultReveal } from "@/lib/reveal/confidence-gate";
+import { formatEngineReasonForDisplay } from "@/lib/reveal/reason-display";
 import type {
   RevealFaultKey,
   RevealInput,
@@ -23,8 +26,20 @@ const JOINT_FAMILY: Partial<Record<string, RevealJointFamily>> = {
   head_sway: "head",
 };
 
-function primaryMetric(diagnosis: DiagnosisResult): DiagnosisResult["evidence"][0] | null {
+function primaryMetric(
+  diagnosis: DiagnosisResult,
+): DiagnosisResult["evidence"][0] | null {
   return diagnosis.evidence[0] ?? null;
+}
+
+function metricReadable(
+  metricEv: DiagnosisResult["evidence"][0] | null,
+): boolean {
+  return (
+    metricEv != null &&
+    metricEv.confidence >= METRIC_READ_CONFIDENCE_THRESHOLD &&
+    metricEv.value != null
+  );
 }
 
 export function diagnosisToRevealInput(input: {
@@ -40,11 +55,12 @@ export function diagnosisToRevealInput(input: {
 }): RevealInput {
   const { diagnosis, coach, voice, protocol, angle } = input;
   const metricEv = primaryMetric(diagnosis);
+  const readable = metricReadable(metricEv);
   const faultKey =
     (diagnosis.fault_key && FAULT_KEY_MAP[diagnosis.fault_key]) ||
     (angle === "face_on" ? "hip_slide_down" : "early_extension");
 
-  const value = metricEv?.value ?? 0;
+  const value = readable ? (metricEv?.value ?? 0) : 0;
   const bandMin = metricEv?.band?.low ?? 0;
   const bandMax = metricEv?.band?.high ?? 6;
 
@@ -52,11 +68,12 @@ export function diagnosisToRevealInput(input: {
     coach?.feel_cue ||
     voice?.feel_cue ||
     coach?.why ||
+    voice?.explanation ||
     diagnosis.headline_fault ||
-    "Keep working on the fix.";
+    "";
 
   const drillName =
-    coach?.drill.name || protocol?.name || "Practice drill";
+    coach?.drill.name || protocol?.name || voice?.feel_cue || "Practice drill";
 
   const targetDelta =
     diagnosis.delta_pct_stance ??
@@ -64,7 +81,10 @@ export function diagnosisToRevealInput(input: {
       ? Math.min(0, (metricEv.band.high ?? 0) - metricEv.value)
       : -8);
 
-  return {
+  const rawReason = diagnosis.reasons[0] ?? "Measured from pose";
+  const displayReason = formatEngineReasonForDisplay(rawReason);
+
+  const revealInput: RevealInput = {
     fault: faultKey,
     metric: {
       key:
@@ -80,8 +100,8 @@ export function diagnosisToRevealInput(input: {
           : "Pelvis vs. tush line",
       value: Math.abs(value),
       unit: "pct_stance",
-      confidence: metricEv?.confidence ?? 0.5,
-      reason: diagnosis.reasons[0] ?? "Measured from pose",
+      confidence: readable ? (metricEv?.confidence ?? 0) : 0,
+      reason: displayReason || "Measured from pose",
       bandMin: bandMin ?? 0,
       bandMax: bandMax ?? 6,
     },
@@ -102,10 +122,16 @@ export function diagnosisToRevealInput(input: {
           : "Could not read reliably",
     bestSwingTimestamp: "n/a",
     whatChangedSince: input.whatChangedSince,
-    insufficientData: diagnosis.outcome === "insufficient_data",
+    insufficientData:
+      diagnosis.outcome === "insufficient_data" ||
+      diagnosis.outcome === "refuse",
     outcome: diagnosis.outcome,
-    headline: coach?.headline ?? diagnosis.headline_fault ?? "",
-    coachWhy: coach?.why,
+    headline:
+      coach?.headline ??
+      (voice?.explanation.split(".")[0]?.trim() || voice?.explanation) ??
+      diagnosis.headline_fault ??
+      "",
+    coachWhy: coach?.why ?? voice?.explanation ?? diagnosis.headline_fault ?? "",
     gripAndFaceLine: coach?.grip_and_face_line,
     retestDeltaPct: diagnosis.delta_pct_stance,
     firstGuiltyFrameMs:
@@ -116,8 +142,10 @@ export function diagnosisToRevealInput(input: {
             input.keypoints,
             diagnosis.first_guilty_frame,
           )
-        : 180),
+        : 0),
   };
+
+  return revealInput;
 }
 
 export function insufficientRevealInput(
@@ -127,7 +155,7 @@ export function insufficientRevealInput(
     diagnosis,
     angle: "face_on",
     coach: {
-      headline: diagnosis.headline_fault ?? "Not enough signed data yet",
+      headline: diagnosis.headline_fault ?? "Not enough signal",
       why: diagnosis.headline_fault ?? "",
       feel_cue: "",
       drill: {
@@ -141,3 +169,5 @@ export function insufficientRevealInput(
     },
   });
 }
+
+export { isNonFaultReveal };

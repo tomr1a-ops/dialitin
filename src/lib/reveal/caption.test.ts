@@ -4,7 +4,6 @@ import {
   firstGuiltyMsBeforeStrike,
   guiltyTimeSecFromStrike,
   isGuiltyFrameTimingInvalid,
-  LOST_POSTURE_CAPTION,
 } from "@/lib/reveal/caption";
 import type { SwingPhases } from "@/lib/engine/phases";
 import { SLO_MO_TIMING_REASON } from "@/lib/engine/slo-mo-export";
@@ -76,14 +75,14 @@ function basePhases(overrides: Partial<SwingPhases> = {}): SwingPhases {
 }
 
 describe("formatGuiltyFrameCaption", () => {
-  test("invalid timing always prints Lost posture with no time", () => {
+  test("invalid timing uses guilty label without strike time", () => {
     expect(
       formatGuiltyFrameCaption({
         guiltyLabel: "Could not read reliably",
         msBeforeStrike: 180,
         timingInvalid: true,
       }),
-    ).toBe(LOST_POSTURE_CAPTION);
+    ).toBe("Could not read reliably.");
   });
 
   test("valid timing under 1s includes strike-relative time", () => {

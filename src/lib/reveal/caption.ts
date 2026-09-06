@@ -1,6 +1,7 @@
 import { SLO_MO_TIMING_REASON } from "@/lib/engine/slo-mo-export";
 import type { SwingPhases } from "@/lib/engine/phases";
 import type { PoseFrame } from "@/lib/pose/types";
+import { formatEngineReasonForDisplay } from "@/lib/reveal/reason-display";
 
 export const GUILTY_TIMING_CONFIDENCE_THRESHOLD = 0.5;
 export const GUILTY_TIME_BEFORE_STRIKE_MAX_MS = 1000;
@@ -24,9 +25,9 @@ export function guiltyTimingReliabilityNote(phases: SwingPhases): string | null 
     return null;
   }
   if (phases.sloMoReexportedAt30.value) {
-    return SLO_MO_TIMING_REASON;
+    return formatEngineReasonForDisplay(SLO_MO_TIMING_REASON);
   }
-  return "Could not read reliably";
+  return formatEngineReasonForDisplay("Could not read reliably");
 }
 
 /** Ms from guilty frame to strike (impact); 0 when impact is missing. */
@@ -53,7 +54,11 @@ export type GuiltyFrameCaptionInput = {
 
 export function formatGuiltyFrameCaption(input: GuiltyFrameCaptionInput): string {
   if (input.timingInvalid) {
-    return LOST_POSTURE_CAPTION;
+    const label = input.guiltyLabel.trim();
+    if (!label) {
+      return LOST_POSTURE_CAPTION;
+    }
+    return label.endsWith(".") ? label : `${label}.`;
   }
   if (input.msBeforeStrike > 0 && input.msBeforeStrike < GUILTY_TIME_BEFORE_STRIKE_MAX_MS) {
     const seconds = (input.msBeforeStrike / 1000).toFixed(2);

@@ -85,7 +85,7 @@ function assertFaultMatchesAngle(
   }
 }
 
-/** Placeholder RevealInput for Phase 2b — real data swap in Phase 2. */
+/** Admin demo placeholder only. Do not import from golfer-facing routes. */
 export function createPlaceholderRevealInput(
   angle: "dtl" | "face_on" = "dtl",
   overrides: Partial<RevealInput> = {},

@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { AnnotatedPlayback } from "@/components/reveal/annotated-playback";
 import { BeforeAfterCompare } from "@/components/reveal/before-after-compare";
 import { FixReceipt } from "@/components/reveal/fix-receipt";
+import { NonFaultRevealScreen } from "@/components/reveal/non-fault-screen";
 import { ProcessingTheater } from "@/components/reveal/processing-theater";
 import { ShowMeWhy } from "@/components/reveal/show-me-why";
 import { SwingFoundScreen } from "@/components/reveal/swing-found-screen";
@@ -12,7 +14,11 @@ import { DidItWorkCapture } from "@/components/reveal/did-it-work";
 import { WhatChangedSince } from "@/components/reveal/what-changed-since";
 import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
 import type { PoseStatus } from "@/lib/pose/status";
-import { createPlaceholderRevealInput } from "@/lib/reveal/placeholder";
+import {
+  assertRevealInputConfidence,
+  isNonFaultReveal,
+  metricEligibleForReveal,
+} from "@/lib/reveal/confidence-gate";
 import { evaluateHandTraceConfidence } from "@/lib/reveal/trace-path";
 import type { RevealScreen, RevealSession } from "@/lib/reveal/types";
 
@@ -22,15 +28,22 @@ export function RevealFlow({
   autoAdvance = true,
   initialScreen = "processing",
   demoMode = false,
+  onContinueToFix,
 }: {
   session: RevealSession;
   poseStatus?: PoseStatus | null;
   autoAdvance?: boolean;
   initialScreen?: RevealScreen;
   demoMode?: boolean;
+  onContinueToFix?: () => void;
 }) {
   const [screen, setScreen] = useState<RevealScreen>(initialScreen);
   const input = session.input;
+  const nonFault = isNonFaultReveal(input);
+
+  if (!demoMode) {
+    assertRevealInputConfidence(input);
+  }
 
   const wristReconstruction = useMemo(
     () =>
@@ -88,6 +101,7 @@ export function RevealFlow({
   const afterVideoSrc = session.retestVideoSrc ?? session.videoSrc;
   const afterKeypoints = session.retestKeypoints ?? session.keypoints;
   const afterPhases = session.retestPhases ?? session.phases;
+  const showComparison = Boolean(input.whatChangedSince?.headline);
 
   return (
     <div className="mx-auto w-full max-w-[22rem]" data-reveal-screen={resolvedScreen}>
@@ -108,22 +122,21 @@ export function RevealFlow({
           windowEnd={windowEnd}
           onComplete={() => {
             if (autoAdvance || demoMode) {
-              advance("annotated");
+              advance(nonFault ? "annotated" : "annotated");
             }
           }}
         />
       ) : null}
 
-      {resolvedScreen === "annotated" ? (
+      {resolvedScreen === "annotated" && nonFault ? (
+        <NonFaultRevealScreen input={input} />
+      ) : null}
+
+      {resolvedScreen === "annotated" && !nonFault ? (
         <>
-          {input.headline ? (
+          {input.headline && metricEligibleForReveal(input) ? (
             <p className="mb-4 text-lg font-semibold leading-snug text-white">
               {input.headline}
-            </p>
-          ) : null}
-          {input.insufficientData ? (
-            <p className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-              {input.feelSentence}
             </p>
           ) : null}
           <AnnotatedPlayback
@@ -139,13 +152,23 @@ export function RevealFlow({
             phases={session.phases}
             traceLowConfidence={traceConfidence.lowConfidence}
           />
+          {onContinueToFix && input.outcome === "fault" ? (
+            <button
+              type="button"
+              className="mt-6 min-h-12 w-full rounded-full bg-[#c8f542] text-sm font-semibold text-[#0b1210]"
+              data-testid="reveal-continue-to-fix"
+              onClick={onContinueToFix}
+            >
+              Continue to fix
+            </button>
+          ) : null}
           {input.diagnosisId && session.retestVideoSrc ? (
             <DidItWorkCapture diagnosisId={input.diagnosisId} />
           ) : null}
         </>
       ) : null}
 
-      {resolvedScreen === "show_me" ? (
+      {resolvedScreen === "show_me" && !nonFault ? (
         <>
           <AnnotatedPlayback
             videoSrc={session.videoSrc}
@@ -163,7 +186,7 @@ export function RevealFlow({
         </>
       ) : null}
 
-      {resolvedScreen === "target" ? (
+      {resolvedScreen === "target" && !nonFault ? (
         <TargetPosition
           still={session.videoSrc}
           keypoints={session.keypoints}
@@ -174,7 +197,7 @@ export function RevealFlow({
         />
       ) : null}
 
-      {resolvedScreen === "before_after" ? (
+      {resolvedScreen === "before_after" && !nonFault ? (
         <BeforeAfterCompare
           beforeVideoSrc={session.videoSrc}
           beforeKeypoints={session.keypoints}
@@ -189,7 +212,7 @@ export function RevealFlow({
         />
       ) : null}
 
-      {resolvedScreen === "receipt" ? (
+      {resolvedScreen === "receipt" && !nonFault ? (
         <FixReceipt
           videoSrc={session.videoSrc}
           keypoints={session.keypoints}
@@ -201,43 +224,27 @@ export function RevealFlow({
         />
       ) : null}
 
-      {input.whatChangedSince && resolvedScreen !== "processing" ? (
+      {showComparison && resolvedScreen !== "processing" ? (
         <div className="mt-6">
-          <WhatChangedSince display={input.whatChangedSince} />
+          <WhatChangedSince display={input.whatChangedSince!} />
         </div>
       ) : null}
 
       {demoMode ? (
         <DemoNav screen={resolvedScreen} onNavigate={advance} />
-      ) : resolvedScreen !== "processing" && resolvedScreen !== "swing_found" ? (
-        <footer className="mt-8 flex flex-wrap gap-2">
-          {resolvedScreen !== "annotated" ? (
-            <NavButton label="Reveal" onClick={() => advance("annotated")} />
-          ) : null}
-          <NavButton label="Target" onClick={() => advance("target")} />
-          <NavButton label="Compare" onClick={() => advance("before_after")} />
-          <NavButton label="Receipt" onClick={() => advance("receipt")} />
-        </footer>
+      ) : null}
+
+      {!demoMode && resolvedScreen === "annotated" && nonFault ? (
+        <div className="mt-6">
+          <Link
+            href="/capture"
+            className="inline-flex min-h-11 items-center rounded-full border border-white/20 px-5 text-sm font-semibold text-white/80"
+          >
+            Film again
+          </Link>
+        </div>
       ) : null}
     </div>
-  );
-}
-
-function NavButton({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="min-h-10 rounded-full border border-white/20 px-4 text-xs font-semibold text-white/80"
-      onClick={onClick}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -284,8 +291,8 @@ export function buildRevealSessionFromCapture(
   options: {
     handedness?: RevealSession["handedness"];
     angle?: RevealSession["angle"];
-    input?: RevealSession["input"];
-  } = {},
+    input: RevealSession["input"];
+  },
 ): RevealSession {
   return {
     videoSrc,
@@ -293,6 +300,6 @@ export function buildRevealSessionFromCapture(
     phases,
     handedness: options.handedness ?? "right",
     angle: options.angle ?? "dtl",
-    input: options.input ?? createPlaceholderRevealInput(options.angle ?? "dtl"),
+    input: options.input,
   };
 }
