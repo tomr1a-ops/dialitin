@@ -15,6 +15,8 @@ export type PoseFrame = {
   mediaTime: number;
   landmarks: PoseLandmark[];
   crop: CropBox;
+  /** False when golfer tracking was lost and landmarks were zeroed. */
+  tracked?: boolean;
 };
 
 export const POSE_LANDMARK_COUNT = 33;

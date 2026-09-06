@@ -10,8 +10,10 @@ import { SwingFoundScreen } from "@/components/reveal/swing-found-screen";
 import { TargetPosition } from "@/components/reveal/target-position";
 import { DidItWorkCapture } from "@/components/reveal/did-it-work";
 import { WhatChangedSince } from "@/components/reveal/what-changed-since";
+import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
 import type { PoseStatus } from "@/lib/pose/status";
 import { createPlaceholderRevealInput } from "@/lib/reveal/placeholder";
+import { evaluateHandTraceConfidence } from "@/lib/reveal/trace-path";
 import type { RevealScreen, RevealSession } from "@/lib/reveal/types";
 
 export function RevealFlow({
@@ -29,6 +31,27 @@ export function RevealFlow({
 }) {
   const [screen, setScreen] = useState<RevealScreen>(initialScreen);
   const input = session.input;
+
+  const wristReconstruction = useMemo(
+    () =>
+      reconstructLeadWristPath({
+        frames: session.keypoints,
+        phases: session.phases,
+        handedness: session.handedness,
+        capturePath: "upload",
+      }),
+    [session.handedness, session.keypoints, session.phases],
+  );
+
+  const traceConfidence = useMemo(
+    () =>
+      evaluateHandTraceConfidence(session.keypoints, {
+        phases: session.phases,
+        handedness: session.handedness,
+        wristReconstruction,
+      }),
+    [session.handedness, session.keypoints, session.phases, wristReconstruction],
+  );
 
   const trim = session.phases.trim;
   const windowStart = trim?.valid ? trim.value.startMs / 1000 : 0;
@@ -111,7 +134,10 @@ export function RevealFlow({
             angle={session.angle}
             input={input}
           />
-          <ShowMeWhy input={input} />
+          <ShowMeWhy
+            input={input}
+            traceLowConfidence={traceConfidence.lowConfidence}
+          />
           {input.diagnosisId && session.retestVideoSrc ? (
             <DidItWorkCapture diagnosisId={input.diagnosisId} />
           ) : null}
@@ -128,7 +154,10 @@ export function RevealFlow({
             angle={session.angle}
             input={input}
           />
-          <ShowMeWhy input={input} />
+          <ShowMeWhy
+            input={input}
+            traceLowConfidence={traceConfidence.lowConfidence}
+          />
         </>
       ) : null}
 

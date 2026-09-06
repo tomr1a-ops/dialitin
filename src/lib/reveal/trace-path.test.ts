@@ -1,8 +1,12 @@
 import { describe, expect, test } from "vitest";
 import type { PoseFrame } from "@/lib/pose/types";
 import {
+  buildHandTrace,
   buildPelvisTrace,
   buildWristTrace,
+  densifyTraceWithSpline,
+  handCentroid,
+  rejectCentroidJumps,
   smoothTracePath,
   traceToCanvas,
   WRIST_TRACE_VISIBILITY,
@@ -38,29 +42,68 @@ describe("trace-path", () => {
     expect(smoothed[2]?.x).toBe(20);
   });
 
-  test("buildWristTrace skips low-visibility frames", () => {
+  test("handCentroid averages both wrists", () => {
+    const centroid = handCentroid(
+      frame(0, { x: 0, y: 0, width: 100, height: 200 }, {
+        15: { x: 0.4, y: 0.5, visibility: 0.9 },
+        16: { x: 0.6, y: 0.5, visibility: 0.9 },
+      }),
+    );
+    expect(centroid?.x).toBeCloseTo(0.5);
+  });
+
+  test("rejectCentroidJumps removes outlier frames", () => {
+    const filtered = rejectCentroidJumps(
+      [
+        { x: 0, y: 0, dashed: false },
+        { x: 5, y: 0, dashed: false },
+        { x: 100, y: 0, dashed: false },
+        { x: 8, y: 0, dashed: false },
+      ],
+      20,
+    );
+    expect(filtered[2]).toBeNull();
+    expect(filtered[3]?.x).toBe(8);
+  });
+
+  test("buildHandTrace skips low-visibility frames", () => {
     const keypoints = [
       frame(0, { x: 0, y: 0, width: 100, height: 200 }, {
         15: { x: 0.5, y: 0.5, visibility: WRIST_TRACE_VISIBILITY - 0.1 },
+        16: { x: 0.5, y: 0.5, visibility: WRIST_TRACE_VISIBILITY - 0.1 },
+        11: { x: 0.5, y: 0.2, visibility: 0.9 },
+        12: { x: 0.5, y: 0.2, visibility: 0.9 },
+        23: { x: 0.45, y: 0.6, visibility: 0.9 },
+        24: { x: 0.55, y: 0.6, visibility: 0.9 },
       }),
       frame(0.03, { x: 0, y: 0, width: 100, height: 200 }, {
         15: { x: 0.52, y: 0.51, visibility: 0.9 },
+        16: { x: 0.54, y: 0.51, visibility: 0.9 },
+        11: { x: 0.5, y: 0.2, visibility: 0.9 },
+        12: { x: 0.5, y: 0.2, visibility: 0.9 },
+        23: { x: 0.45, y: 0.6, visibility: 0.9 },
+        24: { x: 0.55, y: 0.6, visibility: 0.9 },
       }),
     ];
-    const path = buildWristTrace(keypoints, {
+    const path = buildHandTrace(keypoints, {
       leadWrist: 15,
       startIdx: 0,
       endIdx: 1,
       wristReconstruction: null,
     });
-    expect(path[0]).toBeNull();
-    expect(path[1]).not.toBeNull();
+    expect(path.points[0]).toBeNull();
+    expect(path.points[1]).not.toBeNull();
   });
 
   test("buildWristTrace converts per-frame crop through full-image space", () => {
     const keypoints = [
       frame(0, { x: 50, y: 0, width: 100, height: 200 }, {
         15: { x: 0.5, y: 0.5, visibility: 1 },
+        16: { x: 0.5, y: 0.5, visibility: 1 },
+        11: { x: 0.5, y: 0.2, visibility: 1 },
+        12: { x: 0.5, y: 0.2, visibility: 1 },
+        23: { x: 0.45, y: 0.6, visibility: 1 },
+        24: { x: 0.55, y: 0.6, visibility: 1 },
       }),
     ];
     const path = buildWristTrace(keypoints, {
@@ -71,6 +114,19 @@ describe("trace-path", () => {
     });
     expect(path[0]?.x).toBe(100);
     expect(path[0]?.y).toBe(100);
+  });
+
+  test("densifyTraceWithSpline keeps at least one point per frame run", () => {
+    const densified = densifyTraceWithSpline(
+      [
+        { x: 0, y: 0, dashed: false },
+        { x: 40, y: 0, dashed: false },
+      ],
+      0,
+      4,
+    );
+    expect(densified[0]).not.toBeNull();
+    expect(densified[1]).not.toBeNull();
   });
 
   test("traceToCanvas maps full-image coords to canvas", () => {

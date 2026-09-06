@@ -55,6 +55,8 @@ export type IngestResult = {
     | "main-thread+CPU"
     | "unavailable";
   poseWatchdogHit: boolean;
+  /** Frames where golfer tracking failed and landmarks were zeroed. */
+  lostFrameCount: number;
   grantedCamera?: MediaTrackSettings;
   phases: SwingPhases;
   impactDiagnostics: ImpactDiagnostics;

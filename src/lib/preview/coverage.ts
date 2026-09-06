@@ -39,6 +39,7 @@ export function framesFromStoredKeypoints(value: unknown): PoseFrame[] {
       mediaTime?: number;
       landmarks?: PoseFrame["landmarks"];
       crop?: PoseFrame["crop"];
+      tracked?: boolean;
     };
     if (!Array.isArray(record.landmarks)) {
       return [];
@@ -52,6 +53,7 @@ export function framesFromStoredKeypoints(value: unknown): PoseFrame[] {
         mediaTime: Number(record.mediaTime ?? 0),
         landmarks,
         crop: record.crop ?? { x: 0, y: 0, width: 1, height: 1 },
+        tracked: record.tracked,
       },
     ];
   });

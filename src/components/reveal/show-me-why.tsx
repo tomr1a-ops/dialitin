@@ -7,10 +7,12 @@ export function ShowMeWhy({
   input,
   mode: controlledMode,
   onModeChange,
+  traceLowConfidence = false,
 }: {
   input: RevealInput;
   mode?: "show" | "why";
   onModeChange?: (mode: "show" | "why") => void;
+  traceLowConfidence?: boolean;
 }) {
   const [internalMode, setInternalMode] = useState<"show" | "why">("show");
   const mode = controlledMode ?? internalMode;
@@ -62,6 +64,11 @@ export function ShowMeWhy({
             {metric.value.toFixed(0)}% of stance width
           </p>
           <p className="mt-2 text-sm text-white/70">{input.feelSentence}</p>
+          {traceLowConfidence ? (
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-[#f3c36a]/80">
+              low confidence
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-relaxed text-white/80">
@@ -74,6 +81,13 @@ export function ShowMeWhy({
             <span className="font-semibold text-white">Confidence:</span>{" "}
             {confidencePct}%. {metric.reason}
           </p>
+          {traceLowConfidence ? (
+            <p>
+              <span className="font-semibold text-white">Hand path:</span> low
+              confidence — too many frames were occluded or rejected for a
+              reliable trace.
+            </p>
+          ) : null}
           <p className="text-white/55">
             We measure you, not the stick. That&apos;s why this isn&apos;t
             guessing.

@@ -18,6 +18,13 @@ import {
   recenterCropOnHips,
   scalePoseToFullFrame,
 } from "@/lib/pose/isolate";
+import {
+  invalidateLandmarks,
+  isTrackingLost,
+  pickTrackedPerson,
+  torsoMetrics,
+  type TorsoMetrics,
+} from "@/lib/pose/track";
 import { createPoseRuntime, type PoseRuntime } from "@/lib/pose/pose-runtime";
 import type { PosePathId } from "@/lib/pose/capabilities";
 import type { PoseStatus } from "@/lib/pose/status";
@@ -131,7 +138,11 @@ export async function ingestClip(
 
   let frameHandle: number | null = null;
   let finished = false;
-  let crop: CropBox | null = null;
+  let seedCrop: CropBox | null = null;
+  let lockedCrop: CropBox | null = null;
+  let lastGoodMetrics: TorsoMetrics | null = null;
+  let seedTorsoScale: number | null = null;
+  let lostFrameCount = 0;
   let poseRuntime: PoseRuntime | null = null;
   let poseBackend: IngestResult["poseBackend"] = "unavailable";
   let poseDelegate: IngestResult["poseDelegate"] = "unavailable";
@@ -235,7 +246,7 @@ export async function ingestClip(
                   throw new Error("Pose failed to start: runtime missing");
                 }
 
-                if (!crop) {
+                if (!seedCrop) {
                   const isolationPoses = await poseOnCanvas(
                     poseRuntime,
                     work.canvas,
@@ -244,25 +255,84 @@ export async function ingestClip(
                   );
                   detectStamp += 1;
                   const golfer = pickLargestCentralPerson(isolationPoses);
-                  crop = golfer
+                  seedCrop = golfer
                     ? (cropFromPerson(golfer, work.width, work.height) ??
                       fullFrameCrop(work.width, work.height))
                     : fullFrameCrop(work.width, work.height);
+                  lockedCrop = seedCrop;
                 }
 
-                const croppedPoses = await poseOnCanvas(
+                const activeCrop = lockedCrop ?? seedCrop!;
+                let croppedPoses = await poseOnCanvas(
                   poseRuntime,
                   work.canvas,
-                  crop,
+                  activeCrop,
                   detectStamp,
                 );
                 detectStamp += 1;
-                const tracked =
-                  pickLargestCentralPerson(croppedPoses) ?? croppedPoses[0];
-                const landmarks = padLandmarks(tracked);
+                let candidate = pickTrackedPerson(
+                  croppedPoses,
+                  activeCrop,
+                  lastGoodMetrics,
+                );
+                let candidateMetrics = candidate
+                  ? torsoMetrics(candidate, activeCrop)
+                  : null;
+                let trackingLost = isTrackingLost(
+                  lastGoodMetrics,
+                  candidateMetrics,
+                  seedTorsoScale,
+                );
+
+                if (trackingLost) {
+                  croppedPoses = await poseOnCanvas(
+                    poseRuntime,
+                    work.canvas,
+                    activeCrop,
+                    detectStamp,
+                  );
+                  detectStamp += 1;
+                  candidate = pickTrackedPerson(
+                    croppedPoses,
+                    activeCrop,
+                    lastGoodMetrics,
+                  );
+                  candidateMetrics = candidate
+                    ? torsoMetrics(candidate, activeCrop)
+                    : null;
+                  trackingLost = isTrackingLost(
+                    lastGoodMetrics,
+                    candidateMetrics,
+                    seedTorsoScale,
+                  );
+                }
+
+                let landmarks = candidate ? padLandmarks(candidate) : [];
+                const frameTracked = Boolean(candidate) && !trackingLost;
+
+                if (!frameTracked) {
+                  lostFrameCount += 1;
+                  landmarks = invalidateLandmarks(
+                    landmarks.length > 0
+                      ? landmarks
+                      : padLandmarks(undefined),
+                  );
+                } else if (candidateMetrics) {
+                  lastGoodMetrics = candidateMetrics;
+                  if (seedTorsoScale == null) {
+                    seedTorsoScale = candidateMetrics.torsoScale;
+                  }
+                  lockedCrop = recenterCropOnHips(
+                    activeCrop,
+                    landmarks,
+                    work.width,
+                    work.height,
+                  );
+                }
+
                 const mapped = scalePoseToFullFrame(
                   landmarks,
-                  crop,
+                  activeCrop,
                   work.scale,
                   work.frameWidth,
                   work.frameHeight,
@@ -271,15 +341,8 @@ export async function ingestClip(
                   mediaTime: metadata.mediaTime,
                   landmarks: mapped.landmarks,
                   crop: mapped.crop,
+                  tracked: frameTracked,
                 });
-                if (tracked) {
-                  crop = recenterCropOnHips(
-                    crop,
-                    landmarks,
-                    work.width,
-                    work.height,
-                  );
-                }
 
                 const duration = Number.isFinite(video.duration)
                   ? video.duration
@@ -374,7 +437,7 @@ export async function ingestClip(
       poseElapsedMs > 0 ? (keypoints.length / poseElapsedMs) * 1000 : 0;
     const firstCrop = keypoints[0]?.crop;
     console.info(
-      `[dialitin] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${posePath}, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"})${
+      `[dialitin] frames-processed-per-second ${poseFpsProcessed.toFixed(2)} (${keypoints.length} frames in ${poseElapsedMs.toFixed(0)}ms, ${posePath}, ${poseBackend}/${poseDelegate}, watchdog=${poseWatchdogHit ? "hit" : "ok"}, lost=${lostFrameCount})${
         firstCrop
           ? ` crop=${Math.round(firstCrop.x)},${Math.round(firstCrop.y)},${Math.round(firstCrop.width)}x${Math.round(firstCrop.height)}`
           : ""
@@ -430,6 +493,7 @@ export async function ingestClip(
       poseDelegate,
       posePath,
       poseWatchdogHit,
+      lostFrameCount,
       grantedCamera: options.grantedCamera,
       phases,
       impactDiagnostics,

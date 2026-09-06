@@ -25,6 +25,7 @@ export type IngestRunnerResult = {
   avClockOffsetMs?: number;
   avClockOffsetReason?: string;
   keypoints?: unknown[];
+  lostFrameCount?: number;
   normalized_keypoints?: unknown[] | null;
   phases?: unknown;
   metrics?: unknown;
@@ -100,6 +101,7 @@ export default function IngestRunnerPage() {
           avClockOffsetMs: AV_CLOCK_OFFSET_MS[captureKey],
           avClockOffsetReason: AV_CLOCK_OFFSET_REASON[captureKey],
           keypoints: result.keypoints,
+          lostFrameCount: result.lostFrameCount,
           normalized_keypoints: angleResult.normalizedFrames,
           phases: result.phases,
           metrics,

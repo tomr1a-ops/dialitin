@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * Full G01 ingest: pose + audio via browser ingest runner.
- * Usage: node scripts/g01-full-ingest.mjs [--base http://localhost:3000]
+ * Usage: node scripts/g01-full-ingest.mjs [--base http://localhost:3000] [--save]
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+const shouldSave = process.argv.includes("--save");
 
 function loadEnv() {
   const path = resolve(process.cwd(), ".env.local");
@@ -67,6 +69,25 @@ async function rest(path, query = "", init) {
   return res.json();
 }
 
+function jointCoverage(frames) {
+  const threshold = 0.5;
+  const jointCount = 33;
+  const coverage = [];
+  for (let joint = 0; joint < jointCount; joint++) {
+    const visibilities = frames.map(
+      (frame) => frame.landmarks?.[joint]?.visibility ?? 0,
+    );
+    const visible = visibilities.filter((value) => value >= threshold).length;
+    coverage.push({
+      joint,
+      name: `joint_${joint}`,
+      pctVisible: frames.length === 0 ? 0 : (visible / frames.length) * 100,
+      minVisibility: visibilities.length === 0 ? 0 : Math.min(...visibilities),
+    });
+  }
+  return coverage;
+}
+
 async function signedUrl(storagePath) {
   const res = await fetch(
     `${base}/storage/v1/object/sign/test-swings/${storagePath}`,
@@ -114,15 +135,20 @@ async function main() {
   }
   const clipBytes = await clipRes.arrayBuffer();
 
-  const puppeteer = await import("puppeteer");
-  const browser = await puppeteer.default.launch({
+  const { chromium } = await import("@playwright/test");
+  const browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-    protocolTimeout: 600_000,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    channel: process.env.PLAYWRIGHT_CHROME_CHANNEL || "chrome",
+    args: ["--autoplay-policy=no-user-gesture-required"],
   });
   try {
     const page = await browser.newPage();
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (text.includes("[dialitin]") || text.includes("Pose")) {
+        console.info(`[browser] ${text}`);
+      }
+    });
     page.setDefaultTimeout(600_000);
     await page.goto(`${siteBase}/debug/ingest-runner`, {
       waitUntil: "domcontentloaded",
@@ -133,20 +159,22 @@ async function main() {
     });
 
     const result = await page.evaluate(
-      async (bytes, opts) => {
+      async ({ bytes, opts }) => {
         if (!window.__runIngest) {
           return { ok: false, error: "ingest runner missing" };
         }
-        return window.__runIngest(bytes, opts);
+        return window.__runIngest(new Uint8Array(bytes).buffer, opts);
       },
-      [...new Uint8Array(clipBytes)],
       {
-        capturePath: swing.capture_path === "in_app" ? "in-app" : "upload",
-        fileName: swing.storage_path,
-        handedness: swing.handedness === "left" ? "left" : "right",
-        labeledFrameRate: swing.frame_rate,
-        clubFamily: swing.club_family,
-        intent: swing.intent,
+        bytes: [...new Uint8Array(clipBytes)],
+        opts: {
+          capturePath: swing.capture_path === "in_app" ? "in-app" : "upload",
+          fileName: swing.storage_path,
+          handedness: swing.handedness === "left" ? "left" : "right",
+          labeledFrameRate: swing.frame_rate,
+          clubFamily: swing.club_family,
+          intent: swing.intent,
+        },
       },
     );
 
@@ -154,13 +182,50 @@ async function main() {
       throw new Error(result.error ?? "ingest failed");
     }
 
+    const lostFromFlags = Array.isArray(result.keypoints)
+      ? result.keypoints.filter((frame) => frame?.tracked === false).length
+      : 0;
+    const lostFrameCount = result.lostFrameCount ?? lostFromFlags;
+
+    if (shouldSave) {
+      const frames = Array.isArray(result.keypoints) ? result.keypoints : [];
+      const frameRate =
+        Number(result.detectedFrameRate) > 0
+          ? result.detectedFrameRate
+          : swing.frame_rate || 30;
+      const saveRes = await rest("test_swing_keypoints", "", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          test_swing_id: swing.id,
+          model_version: "mediapipe-pose-landmarker-lite@1.0.1",
+          frame_rate_detected: frameRate,
+          keypoints: frames,
+          coverage: jointCoverage(frames),
+          phases: result.phases,
+          angle: result.angle,
+          normalized_keypoints: result.normalized_keypoints ?? null,
+          metrics: result.metrics,
+        }),
+      });
+      if (!saveRes?.[0]?.id) {
+        throw new Error("Could not save G01 keypoints");
+      }
+    }
+
     console.info(
       "\n--- G01 FULL INGEST ---\n" +
         JSON.stringify(
           {
             golfer: swing.golfer_label,
+            swing_id: swing.id,
             storage_path: swing.storage_path,
+            saved: shouldSave,
             frame_count: result.frameCount,
+            lost_frame_count: lostFrameCount,
             detected_fps: result.detectedFrameRate,
             slo_mo_reexport: result.sloMoReexportedAt30,
             audio_transient_frame:
@@ -176,7 +241,7 @@ async function main() {
           2,
         ),
     );
-    return result;
+    return { ...result, lostFrameCount };
   } finally {
     await browser.close();
   }
