@@ -82,9 +82,6 @@ function loadEnvFile(path: string) {
 
 function loadEnv() {
   loadEnvFile(resolve(process.cwd(), ".env.local"));
-  if (!process.env.YOUTUBE_API_KEY?.trim()) {
-    loadEnvFile(resolve(process.cwd(), "../jenny-ai/.env.local"));
-  }
 }
 
 type SelectedHit = Awaited<ReturnType<typeof searchYouTubeQuery>>[number];
@@ -448,7 +445,12 @@ async function main() {
     "yt-dlp cannot run on Vercel serverless — fetch uses this local worker script.",
   );
 
-  const hits = await selectOnePerQuery();
+  const hits = await selectOnePerQuery().catch((error) => {
+    report.blockers.push(
+      error instanceof Error ? error.message : "YouTube search failed.",
+    );
+    return [] as SelectedHit[];
+  });
   report.found = hits.length;
 
   if (hits.length === 0) {
