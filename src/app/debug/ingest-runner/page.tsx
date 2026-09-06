@@ -45,8 +45,7 @@ declare global {
         intent?: string | null;
       },
     ) => Promise<IngestRunnerResult>;
-    __runIngestFromUrl?: (
-      clipUrl: string,
+    __runIngestFromDom?: (
       options: {
         capturePath: "upload" | "in-app";
         fileName?: string;
@@ -130,24 +129,34 @@ export default function IngestRunnerPage() {
 
   useEffect(() => {
     window.__runIngest = runIngest;
-    window.__runIngestFromUrl = async (clipUrl, options) => {
-      const response = await fetch(clipUrl);
-      if (!response.ok) {
-        return { ok: false, error: `clip fetch ${response.status}` };
+    window.__runIngestFromDom = async (options) => {
+      const input = document.querySelector(
+        "input[data-ingest-file]",
+      ) as HTMLInputElement | null;
+      const file = input?.files?.[0];
+      if (!file) {
+        return { ok: false, error: "no file on ingest input" };
       }
-      const clipBytes = await response.arrayBuffer();
+      const clipBytes = await file.arrayBuffer();
       return runIngest(clipBytes, options);
     };
     window.__ingestReady = true;
     return () => {
       delete window.__runIngest;
-      delete window.__runIngestFromUrl;
+      delete window.__runIngestFromDom;
       delete window.__ingestReady;
     };
   }, [runIngest]);
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6">
+      <input
+        type="file"
+        accept="video/*"
+        data-ingest-file
+        className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
+        aria-hidden
+      />
       <p data-ingest-ready="1" className="text-sm text-white/80">
         Ingest runner ready
       </p>
