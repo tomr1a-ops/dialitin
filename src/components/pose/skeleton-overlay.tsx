@@ -1,29 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { POSE_CONNECTIONS } from "@/lib/pose/connections";
+import {
+  contentRect,
+  drawGolferSkeleton,
+  smoothGolferJoints,
+} from "@/lib/reveal/canvas-utils";
 import { nearestPoseFrame } from "@/lib/pose/nearest-frame";
 import type { PoseFrame } from "@/lib/pose/types";
 
 const SKELETON = "#c8f542";
-
-function contentRect(video: HTMLVideoElement) {
-  const elW = video.clientWidth;
-  const elH = video.clientHeight;
-  const vw = Math.max(video.videoWidth, 1);
-  const vh = Math.max(video.videoHeight, 1);
-  const scale = Math.min(elW / vw, elH / vh);
-  const width = vw * scale;
-  const height = vh * scale;
-  return {
-    x: (elW - width) / 2,
-    y: (elH - height) / 2,
-    width,
-    height,
-    videoWidth: vw,
-    videoHeight: vh,
-  };
-}
+const JOINT_VISIBILITY = 0.15;
 
 function toCanvas(
   frame: PoseFrame,
@@ -31,7 +19,7 @@ function toCanvas(
   rect: ReturnType<typeof contentRect>,
 ) {
   const point = frame.landmarks[index];
-  if (!point || point.visibility < 0.15) {
+  if (!point || point.visibility < JOINT_VISIBILITY) {
     return null;
   }
   const fullX = frame.crop.x + point.x * frame.crop.width;
@@ -42,7 +30,7 @@ function toCanvas(
   };
 }
 
-function drawSkeleton(
+function drawFullSkeleton(
   ctx: CanvasRenderingContext2D,
   frame: PoseFrame,
   rect: ReturnType<typeof contentRect>,
@@ -79,11 +67,18 @@ function drawSkeleton(
 export function SkeletonOverlay({
   videoRef,
   keypoints,
+  showAllLandmarks = false,
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   keypoints: PoseFrame[];
+  /** Admin preview: toggle all 33 MediaPipe landmarks. */
+  showAllLandmarks?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const smoothedJoints = useMemo(
+    () => (showAllLandmarks ? null : smoothGolferJoints(keypoints)),
+    [keypoints, showAllLandmarks],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -103,13 +98,26 @@ export function SkeletonOverlay({
       const frame = nearestPoseFrame(keypoints, video.currentTime);
       const ctx = canvas.getContext("2d");
       if (ctx && frame) {
-        drawSkeleton(ctx, frame, contentRect(video));
+        const rect = contentRect(video);
+        if (showAllLandmarks) {
+          drawFullSkeleton(ctx, frame, rect);
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          const frameIndex = keypoints.indexOf(frame);
+          drawGolferSkeleton(
+            ctx,
+            keypoints,
+            frameIndex >= 0 ? frameIndex : 0,
+            rect,
+            { smoothedJoints: smoothedJoints ?? undefined },
+          );
+        }
       }
       raf = window.requestAnimationFrame(tick);
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [keypoints, videoRef]);
+  }, [keypoints, showAllLandmarks, smoothedJoints, videoRef]);
 
   return (
     <canvas

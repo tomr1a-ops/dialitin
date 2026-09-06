@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   contentRect,
   drawSkeleton,
+  poseFrameIndex,
   resizeCanvasToVideo,
+  smoothGolferJoints,
 } from "@/lib/reveal/canvas-utils";
 import { nearestPoseFrame } from "@/lib/pose/nearest-frame";
 import type { PoseFrame } from "@/lib/pose/types";
@@ -28,6 +30,10 @@ export function SwingFoundScreen({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const flashStartRef = useRef<number | null>(null);
   const doneRef = useRef(false);
+  const smoothedJoints = useMemo(
+    () => smoothGolferJoints(keypoints),
+    [keypoints],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -57,7 +63,11 @@ export function SwingFoundScreen({
         }
         const elapsed = performance.now() - (flashStartRef.current ?? 0);
         const opacity = elapsed < FLASH_MS ? 1 : 0.35;
-        drawSkeleton(ctx, frame, contentRect(video), { opacity });
+        drawSkeleton(ctx, keypoints, contentRect(video), {
+          opacity,
+          frameIndex: poseFrameIndex(keypoints, frame),
+          smoothedJoints,
+        });
       }
 
       if (video.currentTime >= windowEnd - 0.02 && !doneRef.current) {
@@ -69,7 +79,7 @@ export function SwingFoundScreen({
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [keypoints, onComplete, windowEnd]);
+  }, [keypoints, onComplete, smoothedJoints, windowEnd]);
 
   return (
     <section data-testid="reveal-swing-found">

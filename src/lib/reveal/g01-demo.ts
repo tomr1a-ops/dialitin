@@ -71,12 +71,12 @@ export async function getG01DemoSession(): Promise<RevealSession | null> {
         })
       : null;
 
-  const impactMs = phases.impact.valid ? phases.impact.timeMs : 180;
   const revealInput = diagnosisToRevealInput({
     diagnosis,
     coach: coach?.output ?? null,
     angle,
-    firstGuiltyFrameMs: impactMs,
+    phases,
+    keypoints: g01.keypoints.keypoints,
   });
 
   return {

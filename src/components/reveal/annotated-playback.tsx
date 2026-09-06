@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RevealScrubber } from "@/components/reveal/reveal-scrubber";
 import {
   contentRect,
@@ -9,10 +9,17 @@ import {
   drawSkeleton,
   drawTushLine,
   pelvisCenter,
+  poseFrameIndex,
   resizeCanvasToVideo,
+  smoothGolferJoints,
   tushLineXAtAddress,
   REVEAL_COLORS,
 } from "@/lib/reveal/canvas-utils";
+import {
+  formatGuiltyFrameCaption,
+  guiltyTimeSecFromStrike,
+  isGuiltyFrameTimingInvalid,
+} from "@/lib/reveal/caption";
 import type { RevealInput } from "@/lib/reveal/types";
 import { reconstructLeadWristPath } from "@/lib/engine/occlusion";
 import type { SwingPhases } from "@/lib/engine/phases";
@@ -71,8 +78,19 @@ export function AnnotatedPlayback({
     addressFrame && angle === "dtl"
       ? tushLineXAtAddress(addressFrame, handedness)
       : null;
-  const guiltyTimeSec =
-    windowStart + input.firstGuiltyFrameMs / 1000;
+
+  const guiltyTimingInvalid = isGuiltyFrameTimingInvalid(phases);
+  const guiltyTimeSec = guiltyTimeSecFromStrike(phases, input.firstGuiltyFrameMs);
+  const caption = formatGuiltyFrameCaption({
+    guiltyLabel: input.guiltyLabel,
+    msBeforeStrike: input.firstGuiltyFrameMs,
+    timingInvalid: guiltyTimingInvalid,
+  });
+
+  const smoothedJoints = useMemo(
+    () => smoothGolferJoints(keypoints),
+    [keypoints],
+  );
 
   const wristReconstruction = reconstructLeadWristPath({
     frames: keypoints,
@@ -101,8 +119,11 @@ export function AnnotatedPlayback({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const rect = contentRect(video);
     const timeMs = video.currentTime * 1000;
-
-    drawSkeleton(ctx, frame, rect, { opacity: 0.85 });
+    drawSkeleton(ctx, keypoints, rect, {
+      opacity: 0.85,
+      frameIndex: poseFrameIndex(keypoints, frame),
+      smoothedJoints,
+    });
 
     if (angle === "dtl" && tushLineX != null && addressFrame) {
       if (phases.address.valid && timeMs >= phases.address.timeMs - 50) {
@@ -147,7 +168,16 @@ export function AnnotatedPlayback({
       currentTime: video.currentTime,
       rect,
     });
-  }, [addressFrame, angle, handedness, keypoints, phases, tushLineX, wristReconstruction]);
+  }, [
+    addressFrame,
+    angle,
+    handedness,
+    keypoints,
+    phases,
+    smoothedJoints,
+    tushLineX,
+    wristReconstruction,
+  ]);
 
   const resumeFromHold = useCallback(async () => {
     const video = videoRef.current;
@@ -176,7 +206,7 @@ export function AnnotatedPlayback({
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) {
+    if (!video || !canvas || guiltyTimeSec == null) {
       return;
     }
     let raf = 0;
@@ -265,7 +295,9 @@ export function AnnotatedPlayback({
       return;
     }
     const clamped = Math.min(Math.max(time, windowStart), windowEnd);
-    guiltyTriggeredRef.current = clamped >= guiltyTimeSec;
+    if (guiltyTimeSec != null) {
+      guiltyTriggeredRef.current = clamped >= guiltyTimeSec;
+    }
     setHoldProgress(0);
     setPhase("paused");
     video.currentTime = clamped;
@@ -288,10 +320,7 @@ export function AnnotatedPlayback({
   return (
     <section data-testid="reveal-annotated-playback" data-canvas-fps={canvasFps.toFixed(1)}>
       <h2 className="text-[1.35rem] font-semibold tracking-tight">The reveal</h2>
-      <p className="mt-1 text-sm text-white/60">
-        {input.guiltyLabel}. {(input.firstGuiltyFrameMs / 1000).toFixed(2)}s before
-        the strike.
-      </p>
+      <p className="mt-1 text-sm text-white/60">{caption}</p>
       <div className="relative mt-4 overflow-hidden rounded-2xl bg-black">
         <video
           ref={videoRef}

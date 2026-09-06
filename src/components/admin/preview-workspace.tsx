@@ -118,6 +118,7 @@ export function PreviewWorkspace({
   const impactVideoRef = useRef<HTMLVideoElement>(null);
   const [markBusy, setMarkBusy] = useState(false);
   const [markMessage, setMarkMessage] = useState("");
+  const [showAllLandmarks, setShowAllLandmarks] = useState(false);
   const selected =
     swings.find((swing) => swing.id === selectedId) ?? swings[0] ?? null;
   const pose = selected?.keypoints ?? null;
@@ -260,8 +261,21 @@ export function PreviewWorkspace({
             ) : (
               <p className="p-6 text-sm text-white/50">No signed clip URL.</p>
             )}
-            <SkeletonOverlay videoRef={videoRef} keypoints={keypoints} />
+            <SkeletonOverlay
+              videoRef={videoRef}
+              keypoints={keypoints}
+              showAllLandmarks={showAllLandmarks}
+            />
           </div>
+          <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-white/70">
+            <input
+              type="checkbox"
+              checked={showAllLandmarks}
+              onChange={(event) => setShowAllLandmarks(event.target.checked)}
+              className="rounded border-white/20"
+            />
+            Show all 33 MediaPipe landmarks
+          </label>
 
           <section>
             <h2 className="text-lg font-semibold">Phase diagnostics</h2>
@@ -350,6 +364,7 @@ export function PreviewWorkspace({
                 <SkeletonOverlay
                   videoRef={impactVideoRef}
                   keypoints={keypoints}
+                  showAllLandmarks={showAllLandmarks}
                 />
               </div>
             ) : (

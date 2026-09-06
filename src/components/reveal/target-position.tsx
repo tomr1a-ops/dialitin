@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   contentRect,
   drawAddressHipReferenceLine,
@@ -8,6 +8,7 @@ import {
   drawTushLine,
   pelvisCenter,
   resizeCanvasToVideo,
+  smoothGolferJoints,
   stanceWidthNorm,
   tushLineXAtAddress,
   REVEAL_COLORS,
@@ -39,6 +40,29 @@ export function TargetPosition({
   const frame = keypoints[frameIndex] ?? keypoints[0];
   const addressFrame = keypoints[0] ?? frame;
   const tushLineX = tushLineXAtAddress(addressFrame, handedness);
+  const smoothedJoints = useMemo(
+    () => smoothGolferJoints(keypoints),
+    [keypoints],
+  );
+  const targetKeypoints = useMemo(() => {
+    if (!frame) {
+      return keypoints;
+    }
+    return keypoints.map((point, index) =>
+      index === frameIndex
+        ? applyTargetDelta(
+            frame,
+            input.targetPosition.faultJointFamily,
+            input.targetPosition.targetDelta,
+            addressFrame,
+          )
+        : point,
+    );
+  }, [addressFrame, frame, frameIndex, input.targetPosition, keypoints]);
+  const targetSmoothedJoints = useMemo(
+    () => smoothGolferJoints(targetKeypoints),
+    [targetKeypoints],
+  );
 
   useEffect(() => {
     for (const video of [actualVideoRef.current, targetVideoRef.current]) {
@@ -71,9 +95,13 @@ export function TargetPosition({
         const drawFrame = target
           ? applyTargetDelta(frame, input.targetPosition.faultJointFamily, input.targetPosition.targetDelta, addressFrame)
           : frame;
+        const panelKeypoints = target ? targetKeypoints : keypoints;
+        const panelSmoothed = target ? targetSmoothedJoints : smoothedJoints;
 
-        drawSkeleton(ctx, drawFrame, rect, {
+        drawSkeleton(ctx, panelKeypoints, rect, {
           color: target ? REVEAL_COLORS.target : REVEAL_COLORS.skeleton,
+          frameIndex,
+          smoothedJoints: panelSmoothed,
         });
 
         if (angle === "dtl" && tushLineX != null) {
@@ -97,7 +125,7 @@ export function TargetPosition({
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [addressFrame, angle, frame, input.targetPosition, tushLineX, videoSrc]);
+  }, [addressFrame, angle, frame, frameIndex, input.targetPosition, keypoints, smoothedJoints, targetKeypoints, targetSmoothedJoints, tushLineX, videoSrc]);
 
   return (
     <section data-testid="reveal-target-position">

@@ -136,6 +136,7 @@ export function RevealFlow({
           />
           <ShowMeWhy
             input={input}
+            phases={session.phases}
             traceLowConfidence={traceConfidence.lowConfidence}
           />
           {input.diagnosisId && session.retestVideoSrc ? (
@@ -156,6 +157,7 @@ export function RevealFlow({
           />
           <ShowMeWhy
             input={input}
+            phases={session.phases}
             traceLowConfidence={traceConfidence.lowConfidence}
           />
         </>

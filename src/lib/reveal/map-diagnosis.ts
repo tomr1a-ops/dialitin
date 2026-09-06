@@ -1,6 +1,9 @@
 import type { CoachOutput } from "@/lib/coach/schema";
 import type { DiagnosisResult } from "@/lib/engine/diagnose";
 import type { ProtocolEntry, VoiceEntry } from "@/lib/engine/content";
+import type { SwingPhases } from "@/lib/engine/phases";
+import type { PoseFrame } from "@/lib/pose/types";
+import { firstGuiltyMsBeforeStrike } from "@/lib/reveal/caption";
 import type {
   RevealFaultKey,
   RevealInput,
@@ -32,6 +35,8 @@ export function diagnosisToRevealInput(input: {
   angle: "dtl" | "face_on";
   whatChangedSince?: WhatChangedSinceDisplay;
   firstGuiltyFrameMs?: number;
+  phases?: SwingPhases | null;
+  keypoints?: PoseFrame[];
 }): RevealInput {
   const { diagnosis, coach, voice, protocol, angle } = input;
   const metricEv = primaryMetric(diagnosis);
@@ -89,10 +94,9 @@ export function diagnosisToRevealInput(input: {
       bandMin: bandMin ?? 0,
       bandMax: bandMax ?? 6,
     },
-    firstGuiltyFrameMs: input.firstGuiltyFrameMs ?? 180,
     guiltyLabel:
       diagnosis.outcome === "fault"
-        ? "Fault onset here"
+        ? "Lost posture here"
         : diagnosis.outcome === "dont_fix_it"
           ? "Functional range"
           : "Could not read reliably",
@@ -104,6 +108,15 @@ export function diagnosisToRevealInput(input: {
     coachWhy: coach?.why,
     gripAndFaceLine: coach?.grip_and_face_line,
     retestDeltaPct: diagnosis.delta_pct_stance,
+    firstGuiltyFrameMs:
+      input.firstGuiltyFrameMs ??
+      (input.phases && input.keypoints
+        ? firstGuiltyMsBeforeStrike(
+            input.phases,
+            input.keypoints,
+            diagnosis.first_guilty_frame,
+          )
+        : 180),
   };
 }
 

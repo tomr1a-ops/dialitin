@@ -1,15 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { guiltyTimingReliabilityNote } from "@/lib/reveal/caption";
+import type { SwingPhases } from "@/lib/engine/phases";
 import type { RevealInput } from "@/lib/reveal/types";
 
 export function ShowMeWhy({
   input,
+  phases,
   mode: controlledMode,
   onModeChange,
   traceLowConfidence = false,
 }: {
   input: RevealInput;
+  phases?: SwingPhases | null;
   mode?: "show" | "why";
   onModeChange?: (mode: "show" | "why") => void;
   traceLowConfidence?: boolean;
@@ -27,6 +31,7 @@ export function ShowMeWhy({
 
   const { metric } = input;
   const confidencePct = Math.round(metric.confidence * 100);
+  const timingReliabilityNote = phases ? guiltyTimingReliabilityNote(phases) : null;
 
   return (
     <section data-testid="reveal-show-me-why">
@@ -64,6 +69,11 @@ export function ShowMeWhy({
             {metric.value.toFixed(0)}% of stance width
           </p>
           <p className="mt-2 text-sm text-white/70">{input.feelSentence}</p>
+          {timingReliabilityNote ? (
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-[#f3c36a]/80">
+              {timingReliabilityNote}
+            </p>
+          ) : null}
           {traceLowConfidence ? (
             <p className="mt-3 text-xs font-medium uppercase tracking-wide text-[#f3c36a]/80">
               low confidence
@@ -81,6 +91,12 @@ export function ShowMeWhy({
             <span className="font-semibold text-white">Confidence:</span>{" "}
             {confidencePct}%. {metric.reason}
           </p>
+          {timingReliabilityNote ? (
+            <p>
+              <span className="font-semibold text-white">Timing:</span>{" "}
+              {timingReliabilityNote}
+            </p>
+          ) : null}
           {traceLowConfidence ? (
             <p>
               <span className="font-semibold text-white">Hand path:</span> low

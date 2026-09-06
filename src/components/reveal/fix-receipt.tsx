@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   contentRect,
   drawAddressHipReferenceLine,
@@ -8,6 +8,7 @@ import {
   drawTushLine,
   pelvisCenter,
   resizeCanvasToVideo,
+  smoothGolferJoints,
   tushLineXAtAddress,
   REVEAL_COLORS,
 } from "@/lib/reveal/canvas-utils";
@@ -43,6 +44,10 @@ export function FixReceipt({
   const frame = keypoints[frameIndex] ?? keypoints[0];
   const addressFrame = keypoints[0] ?? frame;
   const tushLineX = tushLineXAtAddress(addressFrame, handedness);
+  const smoothedJoints = useMemo(
+    () => smoothGolferJoints(keypoints),
+    [keypoints],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -67,7 +72,10 @@ export function FixReceipt({
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const rect = contentRect(video);
-        drawSkeleton(ctx, frame, rect);
+        drawSkeleton(ctx, keypoints, rect, {
+          frameIndex,
+          smoothedJoints,
+        });
         if (angle === "dtl" && tushLineX != null) {
           drawTushLine(ctx, addressFrame, rect, tushLineX);
         }
@@ -90,12 +98,14 @@ export function FixReceipt({
       renderReceiptPng(
         exportCanvas,
         video,
-        frame,
+        keypoints,
+        frameIndex,
         addressFrame,
         handedness,
         angle,
         input,
         showRetestDelta,
+        smoothedJoints,
       );
       const dataUrl = exportCanvas.toDataURL("image/png");
       onPngReady?.(dataUrl);
@@ -105,7 +115,7 @@ export function FixReceipt({
       window.cancelAnimationFrame(raf);
       window.clearTimeout(exportTimer);
     };
-  }, [addressFrame, angle, frame, handedness, input, onPngReady, showRetestDelta, tushLineX, videoSrc]);
+  }, [addressFrame, angle, frame, frameIndex, handedness, input, keypoints, onPngReady, showRetestDelta, smoothedJoints, tushLineX, videoSrc]);
 
   return (
     <section data-testid="reveal-fix-receipt">
@@ -182,12 +192,14 @@ function ReceiptCardPreview({
 function renderReceiptPng(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
-  frame: PoseFrame,
+  keypoints: PoseFrame[],
+  frameIndex: number,
   addressFrame: PoseFrame,
   handedness: "left" | "right",
   angle: "dtl" | "face_on",
   input: RevealInput,
   showRetestDelta: boolean,
+  smoothedJoints: ReturnType<typeof smoothGolferJoints>,
 ) {
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -207,8 +219,16 @@ function renderReceiptPng(
     videoWidth: video.videoWidth,
     videoHeight: video.videoHeight,
   };
+  const frame = keypoints[frameIndex] ?? keypoints[0];
+  if (!frame) {
+    return;
+  }
   const tushLineX = tushLineXAtAddress(addressFrame, handedness);
-  drawSkeleton(ctx, frame, rect, { opacity: 0.9 });
+  drawSkeleton(ctx, keypoints, rect, {
+    opacity: 0.9,
+    frameIndex,
+    smoothedJoints,
+  });
   if (angle === "dtl" && tushLineX != null) {
     drawTushLine(ctx, addressFrame, rect, tushLineX);
   }

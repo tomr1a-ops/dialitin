@@ -1,5 +1,14 @@
 import type { PoseFrame } from "@/lib/pose/types";
-import { POSE_CONNECTIONS } from "@/lib/pose/connections";
+import {
+  GOLFER_HEAD,
+  GOLFER_SKELETON_CONNECTIONS,
+  GOLFER_SKELETON_JOINTS,
+  golferJointLandmarkIndex,
+  LEFT_EAR,
+  RIGHT_EAR,
+  type GolferSkeletonJoint,
+} from "@/lib/pose/golfer-skeleton";
+import { TRACE_SMOOTH_WINDOW } from "@/lib/reveal/trace-path";
 import {
   LEFT_HIP,
   LEFT_SHOULDER,
@@ -20,6 +29,11 @@ export const REVEAL_COLORS = {
   reconstructed: "#c8f542",
 } as const;
 
+export const SKELETON_SMOOTH_WINDOW = TRACE_SMOOTH_WINDOW;
+export const BONE_LENGTH_CHANGE_THRESHOLD = 0.4;
+const JOINT_VISIBILITY = 0.15;
+const FADED_JOINT_OPACITY = 0.45;
+
 export type ContentRect = {
   x: number;
   y: number;
@@ -27,6 +41,12 @@ export type ContentRect = {
   height: number;
   videoWidth: number;
   videoHeight: number;
+};
+
+type ImageJoint = {
+  x: number;
+  y: number;
+  visibility: number;
 };
 
 export function contentRect(video: HTMLVideoElement): ContentRect {
@@ -47,13 +67,141 @@ export function contentRect(video: HTMLVideoElement): ContentRect {
   };
 }
 
+function toFullImage(frame: PoseFrame, x: number, y: number) {
+  return {
+    x: frame.crop.x + x * frame.crop.width,
+    y: frame.crop.y + y * frame.crop.height,
+  };
+}
+
+function rawJointInImage(
+  frame: PoseFrame,
+  joint: GolferSkeletonJoint,
+): ImageJoint | null {
+  if (joint === GOLFER_HEAD) {
+    const leftEar = frame.landmarks[LEFT_EAR];
+    const rightEar = frame.landmarks[RIGHT_EAR];
+    if (!leftEar || !rightEar) {
+      return null;
+    }
+    const visibility = Math.min(leftEar.visibility, rightEar.visibility);
+    if (visibility < JOINT_VISIBILITY) {
+      return null;
+    }
+    const cx = (leftEar.x + rightEar.x) / 2;
+    const cy = (leftEar.y + rightEar.y) / 2;
+    return { ...toFullImage(frame, cx, cy), visibility };
+  }
+
+  const index = golferJointLandmarkIndex(joint);
+  if (index == null) {
+    return null;
+  }
+  const point = frame.landmarks[index];
+  if (!point || point.visibility < JOINT_VISIBILITY) {
+    return null;
+  }
+  return { ...toFullImage(frame, point.x, point.y), visibility: point.visibility };
+}
+
+/** 5-frame centered moving average per joint in full-image space. */
+export function smoothGolferJoints(
+  keypoints: PoseFrame[],
+  windowSize = SKELETON_SMOOTH_WINDOW,
+): (Partial<Record<GolferSkeletonJoint, ImageJoint>> | null)[] {
+  const half = Math.floor(windowSize / 2);
+  const raw = keypoints.map((frame) => {
+    const joints: Partial<Record<GolferSkeletonJoint, ImageJoint>> = {};
+    for (const joint of GOLFER_SKELETON_JOINTS) {
+      const point = rawJointInImage(frame, joint);
+      if (point) {
+        joints[joint] = point;
+      }
+    }
+    return Object.keys(joints).length > 0 ? joints : null;
+  });
+
+  return raw.map((frameJoints, index) => {
+    if (!frameJoints) {
+      return null;
+    }
+    const smoothed: Partial<Record<GolferSkeletonJoint, ImageJoint>> = {};
+    for (const joint of GOLFER_SKELETON_JOINTS) {
+      if (!frameJoints[joint]) {
+        continue;
+      }
+      let sumX = 0;
+      let sumY = 0;
+      let visSum = 0;
+      let count = 0;
+      for (let j = index - half; j <= index + half; j++) {
+        const neighbor = raw[j]?.[joint];
+        if (!neighbor) {
+          continue;
+        }
+        sumX += neighbor.x;
+        sumY += neighbor.y;
+        visSum += neighbor.visibility;
+        count += 1;
+      }
+      if (count === 0) {
+        continue;
+      }
+      smoothed[joint] = {
+        x: sumX / count,
+        y: sumY / count,
+        visibility: visSum / count,
+      };
+    }
+    return Object.keys(smoothed).length > 0 ? smoothed : null;
+  });
+}
+
+function boneLength(
+  a: ImageJoint | undefined,
+  b: ImageJoint | undefined,
+): number | null {
+  if (!a || !b) {
+    return null;
+  }
+  const length = Math.hypot(a.x - b.x, a.y - b.y);
+  return length > 0 ? length : null;
+}
+
+function shouldSkipBone(
+  current: Partial<Record<GolferSkeletonJoint, ImageJoint>> | null,
+  previous: Partial<Record<GolferSkeletonJoint, ImageJoint>> | null,
+  start: GolferSkeletonJoint,
+  end: GolferSkeletonJoint,
+): boolean {
+  const currentLength = boneLength(current?.[start], current?.[end]);
+  const previousLength = boneLength(previous?.[start], previous?.[end]);
+  if (currentLength == null || previousLength == null || previousLength <= 0) {
+    return false;
+  }
+  const change = Math.abs(currentLength - previousLength) / previousLength;
+  return change > BONE_LENGTH_CHANGE_THRESHOLD;
+}
+
+function jointToCanvas(
+  point: ImageJoint,
+  frame: PoseFrame,
+  rect: ContentRect,
+) {
+  return {
+    x: rect.x + (point.x / rect.videoWidth) * rect.width,
+    y: rect.y + (point.y / rect.videoHeight) * rect.height,
+    visibility: point.visibility,
+  };
+}
+
 export function toCanvasPoint(
   frame: PoseFrame,
   index: number,
   rect: ContentRect,
 ) {
   const point = frame.landmarks[index];
-  if (!point || point.visibility < 0.15) {
+  if (!point || point.visibility < JOINT_VISIBILITY) {
     return null;
   }
   const fullX = frame.crop.x + point.x * frame.crop.width;
@@ -90,21 +238,36 @@ export function normToCanvas(
   return landmarkToCanvas(frame, x, y, rect);
 }
 
-export function drawSkeleton(
+export function drawGolferSkeleton(
   ctx: CanvasRenderingContext2D,
-  frame: PoseFrame,
+  keypoints: PoseFrame[],
+  frameIndex: number,
   rect: ContentRect,
   options: {
     color?: string;
     opacity?: number;
     lineWidth?: number;
     jointRadius?: number;
+    smoothedJoints?: ReturnType<typeof smoothGolferJoints>;
   } = {},
 ) {
+  const frame = keypoints[frameIndex];
+  if (!frame) {
+    return;
+  }
+
   const color = options.color ?? REVEAL_COLORS.skeleton;
   const opacity = options.opacity ?? 1;
   const lineWidth = options.lineWidth ?? 3;
   const jointRadius = options.jointRadius ?? 3.5;
+  const smoothed =
+    options.smoothedJoints ?? smoothGolferJoints(keypoints, SKELETON_SMOOTH_WINDOW);
+  const current = smoothed[frameIndex];
+  const previous = frameIndex > 0 ? smoothed[frameIndex - 1] : null;
+
+  if (!current) {
+    return;
+  }
 
   ctx.save();
   ctx.lineWidth = lineWidth;
@@ -113,28 +276,68 @@ export function drawSkeleton(
   ctx.fillStyle = color;
   ctx.globalAlpha = opacity;
 
-  for (const [start, end] of POSE_CONNECTIONS) {
-    const a = toCanvasPoint(frame, start, rect);
-    const b = toCanvasPoint(frame, end, rect);
+  for (const [start, end] of GOLFER_SKELETON_CONNECTIONS) {
+    if (shouldSkipBone(current, previous, start, end)) {
+      continue;
+    }
+    const a = current[start];
+    const b = current[end];
     if (!a || !b) {
       continue;
     }
+    const canvasA = jointToCanvas(a, frame, rect);
+    const canvasB = jointToCanvas(b, frame, rect);
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(canvasA.x, canvasA.y);
+    ctx.lineTo(canvasB.x, canvasB.y);
     ctx.stroke();
   }
 
-  for (let i = 0; i < frame.landmarks.length; i++) {
-    const point = toCanvasPoint(frame, i, rect);
+  for (const joint of GOLFER_SKELETON_JOINTS) {
+    const point = current[joint];
     if (!point) {
       continue;
     }
+    const canvasPoint = jointToCanvas(point, frame, rect);
+    const faded = GOLFER_SKELETON_CONNECTIONS.some(([start, end]) => {
+      if (start !== joint && end !== joint) {
+        return false;
+      }
+      return shouldSkipBone(current, previous, start, end);
+    });
+    ctx.globalAlpha = opacity * (faded ? FADED_JOINT_OPACITY : 1);
     ctx.beginPath();
-    ctx.arc(point.x, point.y, jointRadius, 0, Math.PI * 2);
+    ctx.arc(canvasPoint.x, canvasPoint.y, jointRadius, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = opacity;
   }
+
   ctx.restore();
+}
+
+/** Golfer-facing 12-joint skeleton with smoothing and bone-length gate. */
+export function drawSkeleton(
+  ctx: CanvasRenderingContext2D,
+  frameOrKeypoints: PoseFrame | PoseFrame[],
+  rect: ContentRect,
+  options: {
+    color?: string;
+    opacity?: number;
+    lineWidth?: number;
+    jointRadius?: number;
+    frameIndex?: number;
+    smoothedJoints?: ReturnType<typeof smoothGolferJoints>;
+  } = {},
+) {
+  if (Array.isArray(frameOrKeypoints)) {
+    const frameIndex =
+      options.frameIndex ??
+      Math.max(0, frameOrKeypoints.length - 1);
+    drawGolferSkeleton(ctx, frameOrKeypoints, frameIndex, rect, options);
+    return;
+  }
+
+  drawGolferSkeleton(ctx, [frameOrKeypoints], 0, rect, options);
 }
 
 export function tushLineXAtAddress(
@@ -258,4 +461,21 @@ export function resizeCanvasToVideo(
     canvas.width = w;
     canvas.height = h;
   }
+}
+
+export function poseFrameIndex(keypoints: PoseFrame[], frame: PoseFrame): number {
+  const direct = keypoints.indexOf(frame);
+  if (direct >= 0) {
+    return direct;
+  }
+  let best = 0;
+  let bestDelta = Infinity;
+  for (let i = 0; i < keypoints.length; i++) {
+    const delta = Math.abs(keypoints[i]!.mediaTime - frame.mediaTime);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+  return best;
 }

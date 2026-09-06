@@ -36,7 +36,7 @@ export type RevealInput = {
   drillName: string;
   drillDurationSec: number;
   targetPosition: RevealTargetPosition;
-  /** First frame pelvis crosses tush line (ms from trim start). */
+  /** Ms before strike when pelvis crosses fault threshold. */
   firstGuiltyFrameMs: number;
   guiltyLabel: string;
   /** Best Swing Today pairing placeholder. */
