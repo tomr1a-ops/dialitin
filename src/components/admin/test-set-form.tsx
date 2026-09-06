@@ -39,6 +39,16 @@ const emptyLabels = (): TestSwingLabels => ({
   pro_label_fault_2: null,
   handedness: "right",
   notes: null,
+  source_url: null,
+  channel: null,
+  license_note: null,
+  tier: null,
+  parent_id: null,
+  excluded: false,
+  exclude_reason: null,
+  label_status: null,
+  segment_start_ms: null,
+  segment_end_ms: null,
 });
 
 export function TestSetForm({ swings }: { swings: TestSwingListItem[] }) {

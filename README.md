@@ -2,7 +2,7 @@
 
 Upload a full swing. Get the #1 thing holding you back — and exactly how to fix it.
 
-**Design document:** [`docs/DialItIn_Design_Rev29.docx`](docs/DialItIn_Design_Rev29.docx).
+**Design document:** [`docs/DialItIn_Design_Rev30.docx`](docs/DialItIn_Design_Rev30.docx).
 
 ## Setup
 

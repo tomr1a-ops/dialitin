@@ -266,6 +266,12 @@ export async function runScorer(options?: {
 
   const rows: ScorerClipRow[] = [];
   for (const swing of (swings ?? []) as TestSwingRow[]) {
+    if (swing.excluded) {
+      continue;
+    }
+    if (swing.label_status === "suggested") {
+      continue;
+    }
     const { data: kpRows, error: kpError } = await secret
       .from("test_swing_keypoints")
       .select("*")

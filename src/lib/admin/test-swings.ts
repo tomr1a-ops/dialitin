@@ -20,6 +20,9 @@ export type CameraYawMarker = (typeof CAMERA_YAW_MARKERS)[number];
 export type ClubFamily = (typeof CLUB_FAMILIES)[number];
 export type ShotIntent = (typeof INTENTS)[number];
 
+export type HarvestTier = "reference" | "answer_key";
+export type LabelStatus = "suggested" | "confirmed";
+
 export type TestSwingLabels = {
   golfer_label: string | null;
   club_family: ClubFamily | null;
@@ -33,6 +36,16 @@ export type TestSwingLabels = {
   pro_label_fault_2: string | null;
   handedness: Handedness | null;
   notes: string | null;
+  source_url: string | null;
+  channel: string | null;
+  license_note: string | null;
+  tier: HarvestTier | null;
+  parent_id: string | null;
+  excluded: boolean;
+  exclude_reason: string | null;
+  label_status: LabelStatus | null;
+  segment_start_ms: number | null;
+  segment_end_ms: number | null;
 };
 
 export type TestSwingRow = TestSwingLabels & {
@@ -147,6 +160,11 @@ export function parseTestSwingLabels(
     return { ok: false, error: "handedness must be right or left." };
   }
 
+  const tierRaw = blankToNull(input.tier);
+  if (tierRaw && tierRaw !== "reference" && tierRaw !== "answer_key") {
+    return { ok: false, error: "tier must be reference or answer_key." };
+  }
+
   return {
     ok: true,
     labels: {
@@ -162,6 +180,21 @@ export function parseTestSwingLabels(
       pro_label_fault_2: blankToNull(input.pro_label_fault_2),
       handedness: handRaw && isHandedness(handRaw) ? handRaw : null,
       notes: blankToNull(input.notes),
+      source_url: blankToNull(input.source_url),
+      channel: blankToNull(input.channel),
+      license_note: blankToNull(input.license_note),
+      tier:
+        tierRaw === "reference" || tierRaw === "answer_key" ? tierRaw : null,
+      parent_id: blankToNull(input.parent_id),
+      excluded: input.excluded === true,
+      exclude_reason: blankToNull(input.exclude_reason),
+      label_status:
+        blankToNull(input.label_status) === "suggested" ||
+        blankToNull(input.label_status) === "confirmed"
+          ? (blankToNull(input.label_status) as LabelStatus)
+          : null,
+      segment_start_ms: null,
+      segment_end_ms: null,
     },
   };
 }

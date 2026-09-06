@@ -52,6 +52,18 @@ export function AdminShell({
             Snapshots
           </Link>
           <Link
+            href="/admin/harvest"
+            className="shrink-0 rounded-full border border-[#c8f542]/30 px-3 py-1.5 text-xs text-[#c8f542]"
+          >
+            Harvest
+          </Link>
+          <Link
+            href="/admin/bands"
+            className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-white/80"
+          >
+            Bands
+          </Link>
+          <Link
             href="/admin/test-set"
             className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-xs text-white/80"
           >
