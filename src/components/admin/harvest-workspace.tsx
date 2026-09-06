@@ -114,6 +114,50 @@ export function HarvestWorkspace() {
     return pipelineJson;
   }
 
+  async function onRunWorker() {
+    setBusy(true);
+    setError("");
+    setStatus("Starting full harvest on Railway worker…");
+    try {
+      const response = await fetch("/api/admin/harvest/worker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seed: true }),
+      });
+      const json = (await response.json()) as {
+        error?: string;
+        found?: number;
+        fetched?: number;
+        uploaded?: number;
+        passedGate?: number;
+        clipsAfterSplit?: number;
+        seedInserted?: number;
+        blockers?: string[];
+      };
+      if (!response.ok) {
+        throw new Error(json.error ?? "Worker run failed.");
+      }
+      setCounts((current) => ({
+        ...current,
+        found: json.found ?? current.found,
+        fetched: current.fetched + (json.fetched ?? 0),
+        passedGate: current.passedGate + (json.passedGate ?? 0),
+        split: current.split + (json.clipsAfterSplit ?? 0),
+      }));
+      const blockers = json.blockers?.length
+        ? ` Blockers: ${json.blockers.join("; ")}`
+        : "";
+      setStatus(
+        `Worker finished — found ${json.found ?? 0}, fetched ${json.fetched ?? 0}, uploaded ${json.uploaded ?? 0}, passed gate ${json.passedGate ?? 0}, seed ${json.seedInserted ?? 0}.${blockers}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Worker run failed.");
+      setStatus("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onFetchSelected() {
     if (selectedItems.length === 0) {
       setError("Select at least one video.");
@@ -248,6 +292,14 @@ export function HarvestWorkspace() {
             className="rounded-lg border border-[#c8f542]/40 px-4 py-2 text-sm text-[#c8f542] disabled:opacity-50"
           >
             Fetch selected ({selectedItems.length})
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onRunWorker()}
+            className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white/80 disabled:opacity-50"
+          >
+            Run on worker
           </button>
         </div>
       </form>

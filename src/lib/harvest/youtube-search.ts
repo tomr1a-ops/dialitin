@@ -7,6 +7,11 @@ import {
   type YouTubeSearchResult,
   youtubeWatchUrl,
 } from "@/lib/harvest/constants";
+import {
+  getCachedHarvestSearch,
+  refreshCachedHarvestHits,
+  setCachedHarvestSearch,
+} from "@/lib/harvest/query-cache";
 
 type YouTubeSearchItem = {
   id?: { videoId?: string };
@@ -80,6 +85,11 @@ export async function searchYouTubeQuery(
   sourceLine: string,
   maxResults = 15,
 ): Promise<HarvestSearchHit[]> {
+  const cached = await getCachedHarvestSearch(query, tier).catch(() => null);
+  if (cached) {
+    return refreshCachedHarvestHits(cached, tier, sourceLine);
+  }
+
   const data = await youtubeFetch<{ items?: YouTubeSearchItem[] }>("search", {
     part: "snippet",
     type: "video",
@@ -91,9 +101,12 @@ export async function searchYouTubeQuery(
     .map((item) => item.id?.videoId)
     .filter((id): id is string => Boolean(id));
   if (ids.length === 0) {
+    await setCachedHarvestSearch(query, tier, []).catch(() => {});
     return [];
   }
-  return hydrateVideoDetails(ids, tier, sourceLine);
+  const hits = await hydrateVideoDetails(ids, tier, sourceLine);
+  await setCachedHarvestSearch(query, tier, hits).catch(() => {});
+  return hits;
 }
 
 export async function hydrateVideoDetails(

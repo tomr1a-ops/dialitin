@@ -157,3 +157,22 @@ describe("textMatchesHarvestKeywords", () => {
     expect(textMatchesHarvestKeywords("PGA DTL slow motion")).toBe(true);
   });
 });
+
+describe("isHarvestQueryCacheFresh", () => {
+  test("accepts rows within 7 days and rejects older", async () => {
+    const { isHarvestQueryCacheFresh, HARVEST_QUERY_CACHE_TTL_MS } =
+      await import("@/lib/harvest/query-cache");
+    const now = Date.now();
+    expect(isHarvestQueryCacheFresh(new Date(now - 1_000))).toBe(true);
+    expect(
+      isHarvestQueryCacheFresh(
+        new Date(now - HARVEST_QUERY_CACHE_TTL_MS + 60_000),
+      ),
+    ).toBe(true);
+    expect(
+      isHarvestQueryCacheFresh(
+        new Date(now - HARVEST_QUERY_CACHE_TTL_MS - 1_000),
+      ),
+    ).toBe(false);
+  });
+});

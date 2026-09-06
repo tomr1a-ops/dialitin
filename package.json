@@ -15,19 +15,22 @@
     "test:e2e": "playwright test",
     "screenshots:reveal": "playwright test e2e/reveal-screenshots.spec.ts",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
-    "harvest:run": "tsx --import ./scripts/ws-preload.mjs scripts/run-harvest.ts --seed"
+    "harvest:run": "tsx --import ./scripts/load-dev-env.mjs --import ./scripts/ws-preload.mjs scripts/run-harvest.ts --seed",
+    "harvest:worker": "tsx --import ./scripts/ws-preload.mjs services/harvest-worker/server.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@mediapipe/tasks-vision": "1.0.1",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.115.0",
+    "express": "^4.21.2",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@types/express": "^5.0.3",
     "@serwist/turbopack": "^9.5.12",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
