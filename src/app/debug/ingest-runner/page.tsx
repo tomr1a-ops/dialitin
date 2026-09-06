@@ -45,6 +45,17 @@ declare global {
         intent?: string | null;
       },
     ) => Promise<IngestRunnerResult>;
+    __runIngestFromUrl?: (
+      clipUrl: string,
+      options: {
+        capturePath: "upload" | "in-app";
+        fileName?: string;
+        handedness?: "right" | "left";
+        labeledFrameRate?: number | null;
+        clubFamily?: string | null;
+        intent?: string | null;
+      },
+    ) => Promise<IngestRunnerResult>;
     __ingestReady?: boolean;
   }
 }
@@ -119,9 +130,18 @@ export default function IngestRunnerPage() {
 
   useEffect(() => {
     window.__runIngest = runIngest;
+    window.__runIngestFromUrl = async (clipUrl, options) => {
+      const response = await fetch(clipUrl);
+      if (!response.ok) {
+        return { ok: false, error: `clip fetch ${response.status}` };
+      }
+      const clipBytes = await response.arrayBuffer();
+      return runIngest(clipBytes, options);
+    };
     window.__ingestReady = true;
     return () => {
       delete window.__runIngest;
+      delete window.__runIngestFromUrl;
       delete window.__ingestReady;
     };
   }, [runIngest]);

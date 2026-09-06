@@ -8,6 +8,7 @@
  *   npx tsx --import ./scripts/ws-preload.mjs scripts/run-harvest.ts [--base URL] [--seed]
  */
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -134,12 +135,30 @@ async function selectOnePerQuery(): Promise<SelectedHit[]> {
 
 async function runIngest(
   siteBase: string,
-  clipBytes: ArrayBuffer,
+  videoPath: string,
   fileName: string,
 ): Promise<{
   keypoints: PoseFrame[];
   frameRate: number;
 }> {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "video/mp4",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(readFileSync(videoPath));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("local clip server failed to bind");
+  }
+  const clipUrl = `http://127.0.0.1:${address.port}/clip.mp4`;
+
   const { chromium } = await import("@playwright/test");
   const browser = await chromium.launch({
     headless: true,
@@ -157,14 +176,14 @@ async function runIngest(
       timeout: 120_000,
     });
     const result = await page.evaluate(
-      async ({ bytes, opts }) => {
-        if (!window.__runIngest) {
-          return { ok: false, error: "ingest runner missing" };
+      async ({ url, opts }) => {
+        if (!window.__runIngestFromUrl) {
+          return { ok: false, error: "ingest runner missing url handler" };
         }
-        return window.__runIngest(new Uint8Array(bytes).buffer, opts);
+        return window.__runIngestFromUrl(url, opts);
       },
       {
-        bytes: [...new Uint8Array(clipBytes)],
+        url: clipUrl,
         opts: {
           capturePath: "upload" as const,
           fileName,
@@ -184,7 +203,14 @@ async function runIngest(
     return { keypoints: frames, frameRate };
   } finally {
     await browser.close();
+    await closeServer(server);
   }
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }
 
 async function savePipeline(
@@ -260,14 +286,7 @@ async function fetchAndPipeline(
         sourcePath = await writeTempVideo(buffer, ext);
         report.fetched += 1;
 
-        const ingest = await runIngest(
-          siteBase,
-          buffer.buffer.slice(
-            buffer.byteOffset,
-            buffer.byteOffset + buffer.byteLength,
-          ),
-          item.title,
-        );
+        const ingest = await runIngest(siteBase, sourcePath, item.title);
 
         const clips = discoverHarvestClips(
           ingest.keypoints,
